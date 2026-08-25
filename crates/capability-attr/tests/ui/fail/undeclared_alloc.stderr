@@ -1,0 +1,11 @@
+error: capability violation in `quiet_fn`: body uses alloc(Heap) but only alloc(None) is declared — add `alloc(Heap)` to #[capability(...)] (or remove the operation that requires it)
+ --> tests/ui/fail/undeclared_alloc.rs:8:4
+  |
+8 | fn quiet_fn() {
+  |    ^^^^^^^^
+
+error[E0425]: cannot find function `quiet_fn` in this scope
+  --> tests/ui/fail/undeclared_alloc.rs:13:5
+   |
+13 |     quiet_fn();
+   |     ^^^^^^^^ not found in this scope

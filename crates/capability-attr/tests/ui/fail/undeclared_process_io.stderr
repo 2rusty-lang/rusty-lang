@@ -1,0 +1,11 @@
+error: capability violation in `run_pager`: body uses io(Process) but only io(Display) is declared — add `io(Process)` to #[capability(...)] (or remove the operation that requires it)
+ --> tests/ui/fail/undeclared_process_io.rs:7:4
+  |
+7 | fn run_pager() {
+  |    ^^^^^^^^^
+
+error[E0425]: cannot find function `run_pager` in this scope
+  --> tests/ui/fail/undeclared_process_io.rs:13:5
+   |
+13 |     run_pager();
+   |     ^^^^^^^^^ not found in this scope

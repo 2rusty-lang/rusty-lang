@@ -1,0 +1,33 @@
+[package]
+name = "sensitive-ifc"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Layer 3 (semantic/policy safety) type-system Information Flow Control for Rust: Sensitive<T, L> / Redacted<T> newtypes that make it a compile error to accidentally Display or serialize classified data. Phase 1 (stable Rust, zero proc-macro) of the companion IFC RFC to SPEC-00045's capability-attr crate; see docs/aisecurity/ifc-rfc.md."
+license.workspace = true
+repository.workspace = true
+
+# Not `[lints] workspace = true` — Cargo forbids mixing `workspace = true`
+# with any lint overrides in the same crate (confirmed live under
+# packages/offline-ops, SPEC-00034 T6: "cannot override `workspace.lints` in
+# `lints`"), so this replicates the workspace's own `[workspace.lints.clippy]
+# all = "deny"` and `[workspace.lints.rust] unexpected_cfgs` verbatim, then
+# adds pedantic/nursery/cargo straight at "deny" — real per-crate violation
+# count was 6 (excluding the workspace-wide `cargo_common_metadata` quirk,
+# carved out below), small enough for enable-from-birth treatment rather
+# than staged retrofit (SPEC-00052 T0b).
+[lints.clippy]
+all = "deny"
+pedantic = "deny"
+nursery = "deny"
+cargo = "deny"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin)'] }
+
+[lib]
+name = "sensitive_ifc"
+path = "src/lib.rs"
+
+[dev-dependencies]
+trybuild = "1"

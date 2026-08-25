@@ -1,0 +1,11 @@
+error: capability violation in `write_raw`: body uses ptr(Write(Any)) but only ptr(None) is declared — add `ptr(Write(Any))` to #[capability(...)] (or remove the operation that requires it)
+ --> tests/ui/fail/undeclared_ptr_write.rs:7:11
+  |
+7 | unsafe fn write_raw(p: *mut u32, val: u32) {
+  |           ^^^^^^^^^
+
+error[E0425]: cannot find function `write_raw` in this scope
+  --> tests/ui/fail/undeclared_ptr_write.rs:15:14
+   |
+15 |     unsafe { write_raw(&mut x as *mut u32, 42) };
+   |              ^^^^^^^^^ not found in this scope
