@@ -1,5 +1,5 @@
 [package]
-name = "capability-attr"
+name = "rusty-capability-attr"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true

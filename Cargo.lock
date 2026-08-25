@@ -3,16 +3,6 @@
 version = 4
 
 [[package]]
-name = "capability-attr"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
- "trybuild",
-]
-
-[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -71,7 +61,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "sensitive-ifc"
+name = "rusty-capability-attr"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+ "trybuild",
+]
+
+[[package]]
+name = "rusty-sensitive-ifc"
 version = "0.1.0"
 dependencies = [
  "trybuild",
