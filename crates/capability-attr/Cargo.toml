@@ -1,11 +1,12 @@
 [package]
 name = "rusty-capability-attr"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 rust-version.workspace = true
 description = "Layer 2 (side-effect / capability safety) #[capability(...)] proc-macro attribute for Rust: declares and enforces a function's allocation/IO/raw-pointer scope at compile time, orthogonal to unsafe. Phase 1 (stable Rust, no rustc changes) of docs/aisecurity/capability-rfc-updated.md, scoped to userspace (git.git) needs — see this crate's own module docs for what was dropped from the RFC's embedded-oriented vocabulary and why."
 license.workspace = true
 repository.workspace = true
+readme = "README.md"
 
 # Not `[lints] workspace = true` — Cargo forbids mixing `workspace = true`
 # with any lint overrides in the same crate (confirmed live under

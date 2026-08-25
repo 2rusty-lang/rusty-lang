@@ -2,12 +2,14 @@
 
 [![build: passing](https://img.shields.io/badge/build-passing-brightgreen.svg)](#building-locally)
 [![tests: 36 passed](https://img.shields.io/badge/tests-36%20passed-brightgreen.svg)](#building-locally)
+[![coverage: 80.66%](https://img.shields.io/badge/coverage-80.66%25-yellow.svg)](#building-locally)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-> Build/test badges above reflect the last local `cargo build --workspace` /
-> `cargo test --workspace` run (2026-08-25) and are static — there is no CI
-> pipeline wired up, so they will not update automatically on future
-> commits. Re-verify locally before trusting them.
+> Build/test/coverage badges above reflect the last local `cargo build
+> --workspace` / `cargo test --workspace` / `cargo tarpaulin --workspace` run
+> (2026-08-25) and are static — there is no CI pipeline wired up, so they
+> will not update automatically on future commits. Re-verify locally before
+> trusting them.
 
 Compile-time safety layers for Rust that sit orthogonal to `unsafe`: one
 enforces a function's side-effect *capabilities* (allocation / I/O / raw

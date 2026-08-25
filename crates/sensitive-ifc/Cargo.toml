@@ -1,11 +1,12 @@
 [package]
 name = "rusty-sensitive-ifc"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 rust-version.workspace = true
 description = "Layer 3 (semantic/policy safety) type-system Information Flow Control for Rust: Sensitive<T, L> / Redacted<T> newtypes that make it a compile error to accidentally Display or serialize classified data. Phase 1 (stable Rust, zero proc-macro) of the companion IFC RFC to SPEC-00045's capability-attr crate; see docs/aisecurity/ifc-rfc.md."
 license.workspace = true
 repository.workspace = true
+readme = "README.md"
 
 # Not `[lints] workspace = true` — Cargo forbids mixing `workspace = true`
 # with any lint overrides in the same crate (confirmed live under
