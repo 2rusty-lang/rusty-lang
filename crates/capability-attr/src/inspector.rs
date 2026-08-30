@@ -11,6 +11,7 @@
 //! that itself expands to an allocating call) — that is explicitly Phase
 //! 2/3 territory (cross-function capability flow), not this pass's scope.
 
+use path_match::{path_has_segment, path_last_two, path_to_string};
 use syn::visit::Visit;
 use syn::{Block, Expr, ExprAssign, ExprCall, ExprUnary, Macro, UnOp};
 
@@ -76,27 +77,6 @@ const PTR_WRITE_CALL_SUFFIXES: &[&str] =
     &["ptr::write", "ptr::write_volatile", "ptr::write_unaligned"];
 /// Fully-qualified raw-pointer read helper suffixes.
 const PTR_READ_CALL_SUFFIXES: &[&str] = &["ptr::read", "ptr::read_volatile", "ptr::read_unaligned"];
-
-fn path_to_string(path: &syn::Path) -> String {
-    path.segments
-        .iter()
-        .map(|s| s.ident.to_string())
-        .collect::<Vec<_>>()
-        .join("::")
-}
-
-fn path_last_two(path: &syn::Path) -> String {
-    let segs: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
-    if segs.len() >= 2 {
-        format!("{}::{}", segs[segs.len() - 2], segs[segs.len() - 1])
-    } else {
-        segs.last().cloned().unwrap_or_default()
-    }
-}
-
-fn path_has_segment(path: &syn::Path, marker: &str) -> bool {
-    path.segments.iter().any(|s| s.ident == marker)
-}
 
 impl<'ast> Visit<'ast> for BodyInspector {
     fn visit_macro(&mut self, mac: &'ast Macro) {

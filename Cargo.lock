@@ -62,18 +62,47 @@ dependencies = [
 
 [[package]]
 name = "rusty-capability-attr"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "proc-macro2",
  "quote",
+ "rusty-path-match",
  "syn 2.0.119",
  "trybuild",
+]
+
+[[package]]
+name = "rusty-path-match"
+version = "0.1.0"
+dependencies = [
+ "syn 2.0.119",
 ]
 
 [[package]]
 name = "rusty-sensitive-ifc"
 version = "0.1.1"
 dependencies = [
+ "trybuild",
+]
+
+[[package]]
+name = "rusty-taint-check"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "rusty-path-match",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "rusty-taint-check-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "rusty-taint-check",
+ "syn 2.0.119",
  "trybuild",
 ]
 

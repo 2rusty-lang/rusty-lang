@@ -1,7 +1,7 @@
 ---
 feature: taint_check
 start_date: 2026-08-24
-status: proposed
+status: accepted
 tracking_issue:
 ---
 

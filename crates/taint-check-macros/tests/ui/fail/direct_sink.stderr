@@ -1,0 +1,13 @@
+error: taint violation: `password` reaches `log_debug` (policy "no_sensitive") without passing through a #[taint_sanitizer] first
+  --> tests/ui/fail/direct_sink.rs:10:9
+   |
+10 |         log_debug(password);
+   |         ^^^^^^^^^
+
+error[E0433]: failed to resolve: use of unresolved module or unlinked crate `auth`
+  --> tests/ui/fail/direct_sink.rs:20:5
+   |
+20 |     auth::handle_login("hunter2");
+   |     ^^^^ use of unresolved module or unlinked crate `auth`
+   |
+   = help: if you wanted to use a crate named `auth`, use `cargo add auth` to add it to your `Cargo.toml`

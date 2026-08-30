@@ -1,0 +1,40 @@
+[package]
+name = "rusty-taint-check-macros"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "The #[taint_check(labels = [...])] proc-macro attribute: a thin wrapper that parses the attribute and calls into rusty-taint-check's AST inspection, turning any taint violation into a real compile_error!(...) at the offending call site. See docs/adr/ADR-0003 and rfcs/0003-taint-check.md."
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+# Not `[lints] workspace = true` — Cargo forbids mixing `workspace = true`
+# with any lint overrides in the same crate (`capability-attr`'s and
+# `sensitive-ifc`'s Cargo.toml hit this too), so this replicates the
+# workspace's own `[workspace.lints.clippy] all = "deny"` and
+# `[workspace.lints.rust] unexpected_cfgs` verbatim, then adds
+# pedantic/nursery/cargo straight at "deny" for the same enable-from-birth
+# reasoning those two crates already applied — see docs/adr/ADR-0003 and
+# rfcs/0003-taint-check.md.
+[lints.clippy]
+all = "deny"
+pedantic = "deny"
+nursery = "deny"
+cargo = "deny"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin)'] }
+
+[lib]
+name = "taint_check_macros"
+path = "src/lib.rs"
+proc-macro = true
+
+[dependencies]
+syn = { version = "2", features = ["full", "extra-traits", "visit", "visit-mut"] }
+quote = "1"
+proc-macro2 = { version = "1", features = ["span-locations"] }
+rusty-taint-check = { path = "../taint-check", version = "0.1.0" }
+
+[dev-dependencies]
+trybuild = "1"

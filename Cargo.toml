@@ -1,5 +1,11 @@
 [workspace]
-members = ["crates/capability-attr", "crates/sensitive-ifc"]
+members = [
+    "crates/capability-attr",
+    "crates/sensitive-ifc",
+    "crates/path-match",
+    "crates/taint-check",
+    "crates/taint-check-macros",
+]
 resolver = "2"
 
 [workspace.package]

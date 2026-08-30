@@ -1,6 +1,6 @@
 [package]
 name = "rusty-capability-attr"
-version = "0.1.1"
+version = "0.1.2"
 edition.workspace = true
 rust-version.workspace = true
 description = "Layer 2 (side-effect / capability safety) #[capability(...)] proc-macro attribute for Rust: declares and enforces a function's allocation/IO/raw-pointer scope at compile time, orthogonal to unsafe. Phase 1 (stable Rust, no rustc changes) of docs/aisecurity/capability-rfc-updated.md, scoped to userspace (git.git) needs — see this crate's own module docs for what was dropped from the RFC's embedded-oriented vocabulary and why."
@@ -35,6 +35,10 @@ proc-macro = true
 syn = { version = "2", features = ["full", "extra-traits", "visit"] }
 quote = "1"
 proc-macro2 = "1"
+# Internal-only shared syn::Path helpers, extracted (0.1.1 -> 0.1.2, no
+# behavior change) so `taint-check` doesn't duplicate them — see
+# crates/path-match's crate docs.
+rusty-path-match = { path = "../path-match", version = "0.1.0" }
 
 [dev-dependencies]
 trybuild = "1"

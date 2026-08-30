@@ -4,7 +4,7 @@ title: Defer implementing the taint-check (Phase 2 IFC) proc-macro
 status: accepted
 date: 2026-08-24
 supersedes: null
-superseded_by: null
+superseded_by: ADR-0003
 ---
 
 # Context
