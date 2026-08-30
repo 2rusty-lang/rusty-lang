@@ -1,0 +1,1 @@
+Sensitive I F C does the same for data. Wrap a value as sensitive, and displaying or serializing it by accident becomes a compile error.

@@ -1,0 +1,208 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @page { size: 13.333in 7.5in; margin: 0; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0;
+    font-family: "DejaVu Sans", "Arial", sans-serif;
+    color: #eef2f6;
+  }
+  .slide {
+    width: 1280px; height: 720px;
+    page-break-after: always;
+    position: relative;
+    padding: 70px 90px;
+    background: linear-gradient(160deg, #0b1220 0%, #10192e 55%, #0b1220 100%);
+    overflow: hidden;
+  }
+  .slide:last-child { page-break-after: avoid; }
+  .kicker {
+    color: #ff8a3d; font-size: 20px; font-weight: 700; letter-spacing: 3px;
+    text-transform: uppercase; margin-bottom: 18px;
+  }
+  h1 { font-size: 56px; line-height: 1.15; margin: 0 0 22px 0; color: #ffffff; font-weight: 800; }
+  h2 { font-size: 40px; line-height: 1.2; margin: 0 0 26px 0; color: #ffffff; font-weight: 800; }
+  .sub { font-size: 26px; color: #9fb3c8; line-height: 1.4; margin: 0 0 10px 0; }
+  p.body { font-size: 24px; line-height: 1.5; color: #d3dce6; margin: 0 0 16px 0; }
+  code, .mono { font-family: "DejaVu Sans Mono", monospace; }
+  .pill {
+    display: inline-block; padding: 6px 16px; border-radius: 999px;
+    background: rgba(255,138,61,0.15); color: #ff8a3d; font-size: 18px; font-weight: 700;
+    border: 1px solid rgba(255,138,61,0.4); margin-bottom: 22px;
+  }
+  ul.list { list-style: none; padding: 0; margin: 10px 0 0 0; }
+  ul.list li {
+    font-size: 24px; color: #d3dce6; padding: 14px 0 14px 46px; position: relative;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+  }
+  ul.list li:before {
+    content: "→"; position: absolute; left: 0; color: #4fd1c5; font-weight: 800; font-size: 24px;
+  }
+  .grid2 { display: flex; gap: 40px; margin-top: 20px; }
+  .card {
+    flex: 1; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 16px; padding: 28px 30px;
+  }
+  .card h3 { font-size: 24px; color: #4fd1c5; margin: 0 0 14px 0; }
+  .card p { font-size: 19px; color: #c3ceda; line-height: 1.5; margin: 0 0 10px 0; }
+  .card p b { color: #fff; }
+  table.tl { width: 100%; border-collapse: collapse; margin-top: 10px; }
+  table.tl td { font-size: 22px; padding: 16px 0; border-bottom: 1px solid rgba(255,255,255,0.08); vertical-align: top; }
+  table.tl td.yr { width: 190px; color: #ff8a3d; font-weight: 800; }
+  td.note { color: #d3dce6; }
+  .codebox {
+    background: #060b14; border: 1px solid rgba(79,209,197,0.35); border-radius: 12px;
+    padding: 26px 30px; font-size: 19px; line-height: 1.6; color: #b7f5ec; margin-top: 22px;
+    white-space: pre-wrap;
+  }
+  .comment { color: #6b7f94; }
+  .footer {
+    position: absolute; bottom: 34px; left: 90px; right: 90px;
+    display: flex; justify-content: space-between; font-size: 15px; color: #4a5a6e;
+  }
+  .center { display: flex; flex-direction: column; justify-content: center; height: 100%; }
+  .bigword { font-size: 130px; font-weight: 900; color: #ffffff; letter-spacing: -2px; }
+  .bigword span { color: #ff8a3d; }
+  .rustystrike { text-decoration: line-through; text-decoration-color:#ff8a3d; text-decoration-thickness: 6px; }
+</style>
+</head>
+<body>
+
+<!-- 1: Title -->
+<div class="slide">
+  <div class="center">
+    <div class="kicker">Singam Tech · Security Architecture</div>
+    <h1>Why Rust&rsquo;s Allocator API<br>Has Been Nightly<br>for a Decade</h1>
+    <p class="sub">...and what it means for AI-generated code</p>
+  </div>
+  <div class="footer"><span>singamtech.com</span><span>1 / 11</span></div>
+</div>
+
+<!-- 2: unsafe is one flag -->
+<div class="slide">
+  <div class="kicker">The Problem</div>
+  <h2>One Keyword, Too Many Kinds of Risk</h2>
+  <p class="body"><code>unsafe</code> means one precise thing: the compiler can&rsquo;t prove the absence of undefined behaviour. But it&rsquo;s Rust&rsquo;s <b>only</b> machine-checked "needs scrutiny" flag &mdash; so it ends up covering:</p>
+  <ul class="list">
+    <li>Memory safety violations</li>
+    <li>Custom allocation behaviour</li>
+    <li>Uncontrolled I/O</li>
+    <li>Raw-pointer access</li>
+  </ul>
+  <div class="footer"><span>singamtech.com</span><span>2 / 11</span></div>
+</div>
+
+<!-- 3: allocator_api timeline -->
+<div class="slide">
+  <div class="kicker">Case Study</div>
+  <h2>allocator_api: RFC 1398</h2>
+  <table class="tl">
+    <tr><td class="yr">2015</td><td class="note">RFC 1398 proposes allocator_api &mdash; Vec&lt;T&gt;, Box&lt;T&gt; generic over a custom allocator.</td></tr>
+    <tr><td class="yr">2015&ndash;2026</td><td class="note">Tracking issue rust-lang/rust#32838 stays open. Blocking question never resolves.</td></tr>
+    <tr><td class="yr">Today</td><td class="note">Still nightly-only. One trait, once stabilized, is permanent &mdash; so the whole feature waits.</td></tr>
+  </table>
+  <p class="body" style="margin-top:24px;">The blocking question: should <code>Allocator::allocate</code> be <code>unsafe fn</code> or safe <code>fn</code>?</p>
+  <div class="footer"><span>singamtech.com</span><span>3 / 11</span></div>
+</div>
+
+<!-- 4: rusty pun -->
+<div class="slide">
+  <div class="center" style="align-items:center; text-align:center;">
+    <div class="bigword">Rust <span class="rustystrike">→</span> <span>Rusty</span></div>
+    <p class="body" style="max-width:900px; text-align:center; font-size:28px; margin-top:20px;">Ten-plus years nightly-only, blocked on one yes/no question about one keyword. Not a knock on Rust&rsquo;s core safety guarantees &mdash; a knock on asking a single binary flag to settle debates it was never built for.</p>
+  </div>
+  <div class="footer"><span>singamtech.com</span><span>4 / 11</span></div>
+</div>
+
+<!-- 5: AI programming world -->
+<div class="slide">
+  <div class="kicker">Why It Matters Now</div>
+  <h2>The AI Programming World</h2>
+  <p class="body">AI assistants draft a growing share of production Rust. When a task needs raw performance, FFI, or systems control, the only lever stable Rust gives them is <code>unsafe</code>.</p>
+  <p class="body">That block conflates a raw pointer, a custom allocator, and uncontrolled I/O into <b>one yes/no signal</b> &mdash; right as review time per line is going down and code volume is going up.</p>
+  <p class="body" style="color:#4fd1c5; font-weight:700;">Review capacity, not generation speed, is the actual bottleneck.</p>
+  <div class="footer"><span>singamtech.com</span><span>5 / 11</span></div>
+</div>
+
+<!-- 6: capability-attr -->
+<div class="slide">
+  <div class="kicker">The Orthogonal Fix</div>
+  <h2>capability-attr</h2>
+  <p class="body">Sidestep the stalled debate instead of waiting for it. Stable Rust, compile-time, today:</p>
+  <div class="codebox">#[capability(alloc(pool = "arena"), io(none), ptr(none))]
+fn build_response(req: &amp;Request) -&gt; Response {
+    <span class="comment">// Compiler-enforced: only "arena" allocation.
+    // Any I/O or raw pointer here is a compile error.</span>
+    ...
+}</div>
+  <div class="footer"><span>singamtech.com</span><span>6 / 11</span></div>
+</div>
+
+<!-- 7: sensitive-ifc -->
+<div class="slide">
+  <div class="kicker">The Orthogonal Fix</div>
+  <h2>sensitive-ifc</h2>
+  <p class="body">The same move, one layer up &mdash; for data classification instead of side-effect scope.</p>
+  <div class="codebox">let ssn: Sensitive&lt;String, Restricted&gt; = Sensitive::new(raw);
+
+<span class="comment">// error[E0277]: Sensitive&lt;String, Restricted&gt;
+// does not implement Display</span>
+println!("{}", ssn);</div>
+  <p class="body" style="margin-top:20px;">A compile error, not a code-review hope.</p>
+  <div class="footer"><span>singamtech.com</span><span>7 / 11</span></div>
+</div>
+
+<!-- 8: where this ends -->
+<div class="slide">
+  <div class="kicker">Defense in Depth</div>
+  <h2>Where This Ends</h2>
+  <div class="grid2">
+    <div class="card">
+      <h3>Compile-time (this project)</h3>
+      <p><b>Catches:</b> a function exceeding its declared alloc/io/ptr scope &mdash; in code built with the attribute applied.</p>
+      <p><b>Can&rsquo;t see:</b> a compromised binary, a dependency that skipped the attribute, any other process on the host.</p>
+    </div>
+    <div class="card">
+      <h3>Runtime, OS-enforced (AppArmor / SELinux)</h3>
+      <p><b>Catches:</b> what any process actually does at the syscall boundary &mdash; regardless of source language.</p>
+      <p><b>Can&rsquo;t see:</b> which internal function allocated what &mdash; no notion of intra-process scope.</p>
+    </div>
+  </div>
+  <div class="footer"><span>singamtech.com</span><span>8 / 11</span></div>
+</div>
+
+<!-- 9: not a replacement -->
+<div class="slide">
+  <div class="center">
+    <div class="kicker">Say It Plainly</div>
+    <h2>Not a Replacement.<br>A Second Layer.</h2>
+    <p class="body" style="font-size:28px; max-width:950px;">Adopting capability-attr / sensitive-ifc should never mean dropping an AppArmor or SELinux profile. Documented as a standing architecture decision &mdash; ADR-0002 &mdash; not a footnote.</p>
+  </div>
+  <div class="footer"><span>singamtech.com</span><span>9 / 11</span></div>
+</div>
+
+<!-- 10: try it -->
+<div class="slide">
+  <div class="kicker">Try It</div>
+  <h2>Open Source, Apache-2.0</h2>
+  <div class="codebox">cargo add rusty-capability-attr
+cargo add rusty-sensitive-ifc</div>
+  <p class="body" style="margin-top:24px;">Published on crates.io. RFCs and architecture decision records in the repo alongside the source.</p>
+  <div class="footer"><span>singamtech.com</span><span>10 / 11</span></div>
+</div>
+
+<!-- 11: CTA -->
+<div class="slide">
+  <div class="center" style="align-items:center; text-align:center;">
+    <div class="kicker">Singam Tech</div>
+    <h2>Guardrails for the<br>AI-Era Codebase</h2>
+    <p class="body" style="font-size:26px;">Compile-time and runtime, together.<br>singamtech.com/contact</p>
+  </div>
+  <div class="footer"><span>singamtech.com</span><span>11 / 11</span></div>
+</div>
+
+</body>
+</html>

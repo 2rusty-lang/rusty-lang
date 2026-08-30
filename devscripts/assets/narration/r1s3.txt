@@ -1,0 +1,1 @@
+So unsafe ends up covering memory safety, custom allocation, uncontrolled input output, and raw pointers, all as one single yes or no flag.

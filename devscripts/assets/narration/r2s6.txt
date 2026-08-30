@@ -1,0 +1,1 @@
+Both crates are open source, on crates dot io. Compile time and runtime, working together. Singam Tech: guardrails for the AI era codebase.

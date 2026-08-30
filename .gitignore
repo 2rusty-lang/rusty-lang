@@ -1,3 +1,6 @@
 /target
 *.env
 *.log
+
+# regenerable devscripts pipeline output (see devscripts/README.md)
+/devscripts/output/

@@ -1,0 +1,1 @@
+The keyword unsafe means exactly one thing: the compiler can't prove there's no undefined behavior. But it's Rust's only machine checked way to say, caution needed.

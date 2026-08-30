@@ -1,0 +1,1 @@
+But compile time checks are not a replacement for App Armor or SE Linux. They catch different things. One layer inside the process. One layer at the kernel.
