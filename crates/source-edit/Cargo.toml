@@ -5,8 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Internal-only surgical source rewriting: replace exactly one syn::Item's byte span with a re-printed, mutated version of itself, leaving the rest of the file byte-identical. Shared by taint-generate and taint-refactor so neither silently reformats a whole file just to add one attribute or one call. Not published — no public-API guarantee."
-publish = false
+description = "Internal-only surgical source rewriting: replace exactly one syn::Item's byte span with a re-printed, mutated version of itself, leaving the rest of the file byte-identical. Shared by taint-generate and taint-refactor so neither silently reformats a whole file just to add one attribute or one call. Published only so those crates resolve from crates.io — no public-API/semver guarantee."
 
 # Not `[lints] workspace = true` — Cargo forbids mixing `workspace = true`
 # with any lint overrides in the same crate, same as every other crate in

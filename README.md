@@ -29,12 +29,13 @@ taint propagation. Independent crates, one workspace.
 | [`rusty-taint-generate`](crates/taint-generate) | [![crates.io](https://img.shields.io/crates/v/rusty-taint-generate.svg)](https://crates.io/crates/rusty-taint-generate) | [![docs.rs](https://docs.rs/rusty-taint-generate/badge.svg)](https://docs.rs/rusty-taint-generate) | Auto-writes `#[capability(...)]` (deterministic) and taint attributes (heuristic) into unannotated source files. |
 | [`rusty-taint-refactor`](crates/taint-refactor) | [![crates.io](https://img.shields.io/crates/v/rusty-taint-refactor.svg)](https://crates.io/crates/rusty-taint-refactor) | [![docs.rs](https://docs.rs/rusty-taint-refactor/badge.svg)](https://docs.rs/rusty-taint-refactor) | Generates an applyable patch (placeholder sanitizer + rewritten call site) for every occurrence of a taint violation found crate-wide. **Review its output before trusting it.** |
 
-Three more workspace members are internal-only (`publish = false`, no
-public API of their own): `crates/path-match` (`syn::Path`-matching
-helpers shared by `capability-attr`/`taint-check`), `crates/capability-core`
-(the capability vocabulary/inspector shared by `capability-attr`/
-`taint-generate`), and `crates/source-edit` (surgical single-item source
-rewriting shared by `taint-generate`/`taint-refactor`).
+Three more workspace members are internal-only (published to crates.io
+only so the crates above resolve their path dependencies there, with no
+public-API/semver guarantee of their own): `crates/path-match`
+(`syn::Path`-matching helpers shared by `capability-attr`/`taint-check`),
+`crates/capability-core` (the capability vocabulary/inspector shared by
+`capability-attr`/`taint-generate`), and `crates/source-edit` (surgical
+single-item source rewriting shared by `taint-generate`/`taint-refactor`).
 
 Design background lives in `docs/aisecurity/capability-rfc-updated.md`,
 `docs/aisecurity/ifc-rfc.md`, `rfcs/0003-taint-check.md` through

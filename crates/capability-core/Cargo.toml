@@ -5,8 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Internal-only capability vocabulary (AllocLevel/IoLevel/PtrLevel/CapabilitySet), body-usage inspector, and declared-vs-detected subset check shared by capability-attr and taint-generate. Not published — no public-API guarantee; extracted from capability-attr's own private modules, which a proc-macro = true crate could never expose to begin with."
-publish = false
+description = "Internal-only capability vocabulary (AllocLevel/IoLevel/PtrLevel/CapabilitySet), body-usage inspector, and declared-vs-detected subset check shared by capability-attr and taint-generate. Published only so those crates resolve from crates.io — no public-API/semver guarantee; extracted from capability-attr's own private modules, which a proc-macro = true crate could never expose to begin with."
 
 # Not `[lints] workspace = true` — Cargo forbids mixing `workspace = true`
 # with any lint overrides in the same crate, same as every other crate in

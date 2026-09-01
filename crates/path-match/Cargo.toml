@@ -5,8 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Internal-only syn::Path matching helpers shared by capability-attr and taint-check (trailing-segment / suffix / marker matching). Not published — no public-API guarantee, extracted purely to de-duplicate private helpers neither crate ever exposed."
-publish = false
+description = "Internal-only syn::Path matching helpers shared by capability-attr and taint-check (trailing-segment / suffix / marker matching). Published only so those crates resolve from crates.io — no public-API/semver guarantee, extracted purely to de-duplicate private helpers neither crate ever exposed."
 
 # Not `[lints] workspace = true` — Cargo forbids mixing `workspace = true`
 # with any lint overrides in the same crate, same as every other crate in
