@@ -1,1 +1,0 @@
-Allocation, input output, and pointer access, checked at compile time. No waiting for the allocator A P I to ever stabilize.

@@ -1,1 +1,0 @@
-Case in point: the allocator A P I. Proposed in 2015. It would let Vec and Box use a custom allocator instead of the global one.

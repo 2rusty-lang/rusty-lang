@@ -1,1 +1,0 @@
-So we built a way around the stalled debate, not through it. Capability attribute is a stable Rust macro that declares a function's real capability scope.

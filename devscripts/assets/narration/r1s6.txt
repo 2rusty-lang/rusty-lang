@@ -1,1 +1,0 @@
-Rust, in this one specific sense, has become rusty. And that gap matters more now that a growing share of Rust code is written by A I.
