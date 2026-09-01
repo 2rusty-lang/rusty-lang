@@ -1,210 +1,33 @@
-//! Capability vocabulary types, plus the `#[capability(...)]` attribute-args
-//! parser.
+//! The `#[capability(...)]` attribute-args parser: turns the tokens inside
+//! the attribute's parens into a [`CapabilitySet`].
 //!
-//! # Vocabulary — reduced from the RFC, grounded in `git.git`'s needs
-//!
-//! `docs/aisecurity/capability-rfc-updated.md` proposes five categories:
-//! `alloc`, `io`, `register`, `ptr`, `interrupt`. This crate implements
-//! three of them:
-//!
-//! - [`AllocLevel`] — kept, but collapsed from the RFC's six embedded-
-//!   specific tiers (`none`/`static`/`bump`/`pool`/`global`/`any` — `bump`
-//!   and `pool` describe allocator strategies with no equivalent in
-//!   userspace Rust, which always uses the global allocator) down to three:
-//!   [`AllocLevel::None`], [`AllocLevel::Heap`], [`AllocLevel::Any`].
-//! - [`IoLevel`] — kept, but reshaped: the RFC's `spi`/`i2c`/`uart`/`dma`
-//!   tiers describe hardware buses `git.git` never touches, so they're
-//!   dropped. In their place, [`IoLevel::Process`] is *added* — the RFC has
-//!   no equivalent, but subprocess spawning (credential helpers, pagers,
-//!   diff/merge tools, hooks) is one of `git.git`'s largest and most
-//!   security-relevant real capability dimensions (see the module doc's
-//!   risk-ordering note below).
-//! - [`PtrLevel`] — kept close to the RFC's own `ptr(write, bounded)` /
-//!   `ptr(write, any)` shape (same `#[capability(ptr(write, bounded))]`
-//!   surface syntax), since raw-pointer capability is exactly what matters
-//!   at an FFI boundary — the eventual integration point this crate is
-//!   built toward (see this workspace's `spec/SPEC-00045-*.md` T3, design-
-//!   only this pass).
-//! - `register(...)` and `interrupt(...)` — **dropped entirely**, not
-//!   stubbed. Both describe hardware register/interrupt-controller access
-//!   that has no meaning for a userspace CLI tool; a stub type with no real
-//!   enforcement behind it would be worse than not shipping the category at
-//!   all (dead API surface implying a guarantee this crate doesn't provide).
-//!
-//! # Risk ordering — `io(process)` ranked above `io(network)`
-//!
-//! The RFC orders IO risk as `display < uart < filesystem < network < dma`.
-//! This crate's reordering (`none < display < filesystem < network <
-//! process < any`) is a deliberate departure, not an oversight: arbitrary
-//! local subprocess execution is effectively arbitrary code execution, and
-//! `git.git` has a real history of command-injection classes of bugs
-//! reaching exactly this surface (credential-helper invocation, submodule
-//! hook/URL handling). Ranking it above `network` reflects that a
-//! compromised subprocess capability is a strictly larger blast radius than
-//! an outbound network connection in this specific target's threat model.
+//! The vocabulary types themselves ([`AllocLevel`], [`IoLevel`],
+//! [`PtrLevel`]/[`PtrBound`], [`CapabilitySet`]) live in `capability-core`
+//! now, shared with `taint-generate` — see that crate's `vocabulary`
+//! module docs for the full reasoning behind the reduced/reshaped
+//! vocabulary and its risk ordering. This module only owns parsing this
+//! macro's specific surface syntax into those types.
 
+use capability_core::{AllocLevel, CapabilitySet, IoLevel, PtrBound, PtrLevel};
 use proc_macro2::TokenStream;
 use syn::parse::Parser;
 use syn::punctuated::Punctuated;
 use syn::{Ident, Meta, Token};
 
-/// Allocation-capability tier, from least to most risk.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AllocLevel {
-    /// No allocation of any kind — stack/static only.
-    None,
-    /// The global heap allocator (`Vec`, `Box`, `String`, `HashMap`, ...).
-    Heap,
-    /// Any allocation strategy, including custom allocators.
-    Any,
-}
-
-impl AllocLevel {
-    /// A total ordering over risk — higher means riskier / less restricted.
-    pub const fn risk_level(self) -> u8 {
-        match self {
-            Self::None => 0,
-            Self::Heap => 1,
-            Self::Any => 2,
-        }
-    }
-}
-
-/// I/O-capability tier, from least to most risk. See this module's doc
-/// comment for why `Process` is ranked above `Network` in this crate.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IoLevel {
-    /// Pure computation — no I/O of any kind.
-    None,
-    /// Write-only console/log output (`println!`, `eprintln!`, `write!`).
-    Display,
-    /// Filesystem read/write (repo objects, refs, config, `.git/` files).
-    Filesystem,
-    /// Outbound network I/O (fetch/push transports).
-    Network,
-    /// Subprocess spawning (`std::process::Command`) — credential helpers,
-    /// hooks, pagers, diff/merge tools. See module doc for why this ranks
-    /// above `Network` in this crate's ordering.
-    Process,
-    /// Unrestricted I/O.
-    Any,
-}
-
-impl IoLevel {
-    /// A total ordering over risk — higher means riskier / less restricted.
-    pub const fn risk_level(self) -> u8 {
-        match self {
-            Self::None => 0,
-            Self::Display => 1,
-            Self::Filesystem => 2,
-            Self::Network => 3,
-            Self::Process => 4,
-            Self::Any => 5,
-        }
-    }
-}
-
-/// Whether a detected/declared raw-pointer write is provably within a
-/// statically declared bound. Phase 1 (this crate, no PAC-style address
-/// verification) can never *prove* `Bounded` from body inspection alone —
-/// any detected raw write is conservatively classified `Any` (see
-/// `inspector.rs`). `Bounded` exists in the vocabulary so a function can
-/// still *declare* it once a future phase can verify it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PtrBound {
-    /// Write is within a statically declared/verified bound.
-    Bounded,
-    /// Write is unbounded/unverified.
-    Any,
-}
-
-/// Raw-pointer-capability tier, from least to most risk.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PtrLevel {
-    /// No raw pointer operations.
-    None,
-    /// Raw pointer reads only.
-    Read,
-    /// Raw pointer writes, bounded or unbounded per [`PtrBound`].
-    Write(PtrBound),
-    /// All raw pointer operations.
-    Any,
-}
-
-impl PtrLevel {
-    /// A total ordering over risk — higher means riskier / less restricted.
-    pub const fn risk_level(self) -> u8 {
-        match self {
-            Self::None => 0,
-            Self::Read => 1,
-            Self::Write(PtrBound::Bounded) => 2,
-            Self::Write(PtrBound::Any) => 3,
-            Self::Any => 4,
-        }
-    }
-}
-
-/// The full set of capabilities a function/module may declare or exhibit.
-/// A category left `None` means "not declared" — [`CapabilitySet::alloc_or_none`]
-/// and friends treat an undeclared category as the most restrictive level,
-/// matching the RFC's "undeclared = not permitted" model.
-#[derive(Debug, Clone, Default)]
-pub struct CapabilitySet {
-    /// Declared/detected allocation capability, if any.
-    pub alloc: Option<AllocLevel>,
-    /// Declared/detected I/O capability, if any.
-    pub io: Option<IoLevel>,
-    /// Declared/detected raw-pointer capability, if any.
-    pub ptr: Option<PtrLevel>,
-}
-
-impl CapabilitySet {
-    /// The declared/detected [`AllocLevel`], defaulting to [`AllocLevel::None`].
-    pub fn alloc_or_none(&self) -> AllocLevel {
-        self.alloc.unwrap_or(AllocLevel::None)
-    }
-
-    /// The declared/detected [`IoLevel`], defaulting to [`IoLevel::None`].
-    pub fn io_or_none(&self) -> IoLevel {
-        self.io.unwrap_or(IoLevel::None)
-    }
-
-    /// The declared/detected [`PtrLevel`], defaulting to [`PtrLevel::None`].
-    pub fn ptr_or_none(&self) -> PtrLevel {
-        self.ptr.unwrap_or(PtrLevel::None)
-    }
-
-    /// Merge `other` into `self`, keeping the higher-risk level per
-    /// category. Used by the body inspector to accumulate the maximum
-    /// capability observed across an entire function body.
-    pub(crate) fn merge_max(&mut self, other: &Self) {
-        if let Some(o) = other.alloc {
-            if o.risk_level() > self.alloc_or_none().risk_level() {
-                self.alloc = Some(o);
-            }
-        }
-        if let Some(o) = other.io {
-            if o.risk_level() > self.io_or_none().risk_level() {
-                self.io = Some(o);
-            }
-        }
-        if let Some(o) = other.ptr {
-            if o.risk_level() > self.ptr_or_none().risk_level() {
-                self.ptr = Some(o);
-            }
-        }
-    }
-}
-
 /// Parse the token stream inside `#[capability(...)]` into a [`CapabilitySet`].
 ///
-/// Accepted surface syntax (a subset of the RFC's, per this module's own
-/// vocabulary-reduction notes above):
+/// Accepted surface syntax (a subset of the RFC's, per `capability-core`'s
+/// own vocabulary-reduction notes):
 ///
 /// ```text
 /// #[capability(alloc(none), io(display), ptr(none))]
 /// #[capability(alloc(heap), io(process), ptr(write, bounded))]
 /// ```
+///
+/// # Errors
+///
+/// Returns `Err` on an unknown category, an unknown level within a known
+/// category, or a duplicate category declaration.
 pub fn parse_capability_args(args: TokenStream) -> syn::Result<CapabilitySet> {
     let parser = Punctuated::<Meta, Token![,]>::parse_terminated;
     let metas = parser.parse2(args)?;
@@ -365,33 +188,20 @@ mod tests {
     }
 
     #[test]
-    fn risk_levels_are_strictly_ordered() {
-        assert!(AllocLevel::None.risk_level() < AllocLevel::Heap.risk_level());
-        assert!(AllocLevel::Heap.risk_level() < AllocLevel::Any.risk_level());
-        assert!(IoLevel::Display.risk_level() < IoLevel::Filesystem.risk_level());
-        assert!(IoLevel::Network.risk_level() < IoLevel::Process.risk_level());
-        assert!(IoLevel::Process.risk_level() < IoLevel::Any.risk_level());
-        assert!(PtrLevel::Read.risk_level() < PtrLevel::Write(PtrBound::Bounded).risk_level());
-        assert!(
-            PtrLevel::Write(PtrBound::Bounded).risk_level()
-                < PtrLevel::Write(PtrBound::Any).risk_level()
-        );
-    }
-
-    #[test]
-    fn merge_max_keeps_the_higher_risk_level() {
-        let mut set = CapabilitySet {
-            alloc: Some(AllocLevel::None),
-            io: Some(IoLevel::Display),
-            ptr: None,
-        };
-        set.merge_max(&CapabilitySet {
+    fn round_trips_through_capability_core_render() {
+        // `capability_core::render_capability_args` is the exact inverse
+        // of this module's own parser — `taint-generate` relies on that
+        // symmetry to write an attribute this crate will itself accept.
+        let original = CapabilitySet {
             alloc: Some(AllocLevel::Heap),
-            io: Some(IoLevel::None),
-            ptr: Some(PtrLevel::Read),
-        });
-        assert_eq!(set.alloc_or_none(), AllocLevel::Heap);
-        assert_eq!(set.io_or_none(), IoLevel::Display);
-        assert_eq!(set.ptr_or_none(), PtrLevel::Read);
+            io: Some(IoLevel::Process),
+            ptr: Some(PtrLevel::Write(PtrBound::Any)),
+        };
+        let rendered = capability_core::render_capability_args(&original);
+        let tokens: proc_macro2::TokenStream = rendered.parse().unwrap();
+        let reparsed = parse_capability_args(tokens).unwrap();
+        assert_eq!(reparsed.alloc_or_none(), original.alloc_or_none());
+        assert_eq!(reparsed.io_or_none(), original.io_or_none());
+        assert_eq!(reparsed.ptr_or_none(), original.ptr_or_none());
     }
 }

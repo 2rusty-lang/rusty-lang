@@ -49,9 +49,10 @@
 //! changes, no nightly compiler — a `syn`/`quote`-based proc-macro attribute
 //! that (1) parses declared capabilities from the attribute's arguments,
 //! (2) walks the annotated function's body with a [`syn::visit::Visit`]
-//! walker ([`inspector::BodyInspector`]) to detect actual capability usage,
-//! and (3) emits a real `compile_error!(...)` when detected capabilities
-//! exceed declared ones ([`lattice::check_subset`] / [`error::emit_violation`]).
+//! walker ([`capability_core::inspector::BodyInspector`]) to detect actual
+//! capability usage, and (3) emits a real `compile_error!(...)` when
+//! detected capabilities exceed declared ones
+//! ([`capability_core::check_subset`] / [`error::emit_violation`]).
 //!
 //! **Scoped to function items only, this pass.** The RFC also describes
 //! module/trait/impl/crate-level declarations with hierarchical narrowing
@@ -72,16 +73,18 @@
 //! - **Phase 3 (deferred, not built this pass):** MIR-level analysis via
 //!   `rustc_private` — nightly-only, out of scope for this crate entirely.
 //!
-//! # Vocabulary — see [`parser`]'s module docs
+//! # Vocabulary — see `capability-core`'s `vocabulary` module docs
 //!
 //! The capability vocabulary implemented here (`alloc`/`io`/`ptr`) is
 //! deliberately reduced from the RFC's five categories and reshaped for
 //! this project's real target (`git.git`, a userspace CLI tool, not
-//! embedded firmware) — see [`parser`]'s module-level doc comment for the
-//! full reasoning, including why `register(...)`/`interrupt(...)` are
-//! dropped entirely rather than stubbed, and why `io(process)` exists (with
-//! no RFC equivalent) and outranks `io(network)` in this crate's risk
-//! ordering.
+//! embedded firmware) — see [`capability_core::vocabulary`]'s
+//! module-level doc comment for the full reasoning, including why
+//! `register(...)`/`interrupt(...)` are dropped entirely rather than
+//! stubbed, and why `io(process)` exists (with no RFC equivalent) and
+//! outranks `io(network)` in this crate's risk ordering. That vocabulary
+//! lives in `capability-core` now, shared with `taint-generate` — see
+//! `docs/adr/ADR-0005-generate-and-refactor.md`.
 //!
 //! # Honest scope statement
 //!
@@ -98,10 +101,10 @@
 //! usage hidden behind a macro that itself expands to an allocating/IO
 //! call (AST-level detection only sees the macro invocation, not its
 //! expansion, unless the macro name itself is recognized — see
-//! [`inspector`]); a raw pointer write's actual address range (Phase 1 has
-//! no PAC-style address verification, so every detected write is
-//! conservatively classified `ptr(write, any)`, never `ptr(write,
-//! bounded)` — see [`parser::PtrBound`]).
+//! [`capability_core::inspector`]); a raw pointer write's actual address
+//! range (Phase 1 has no PAC-style address verification, so every
+//! detected write is conservatively classified `ptr(write, any)`, never
+//! `ptr(write, bounded)` — see [`capability_core::PtrBound`]).
 
 #![warn(missing_docs)]
 // `cargo_common_metadata` inspects every workspace member's `Cargo.toml`
@@ -118,8 +121,6 @@ use proc_macro::TokenStream;
 use syn::ItemFn;
 
 mod error;
-mod inspector;
-mod lattice;
 mod parser;
 
 /// Declare a function's allocation/I/O/raw-pointer capability scope, and
@@ -156,9 +157,9 @@ pub fn capability(args: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
-    let detected = inspector::inspect_body(&func.block);
+    let detected = capability_core::inspector::inspect_body(&func.block);
 
-    if let Some(violation) = lattice::check_subset(&detected, &declared) {
+    if let Some(violation) = capability_core::check_subset(&detected, &declared) {
         return error::emit_violation(&func.sig.ident, &violation).into();
     }
 

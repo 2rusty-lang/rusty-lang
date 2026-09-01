@@ -1,7 +1,7 @@
 //! Subset checking: does the detected [`CapabilitySet`] from a function body
 //! exceed what was declared in `#[capability(...)]`?
 
-use crate::parser::CapabilitySet;
+use crate::vocabulary::CapabilitySet;
 
 /// A single capability-category violation: the body used more than was
 /// declared.
@@ -15,10 +15,11 @@ pub struct Violation {
     pub detected: String,
 }
 
-/// Compare `detected` against `declared`, category by category. Returns the
-/// first violation found (categories are checked in a fixed order: `alloc`,
-/// `io`, `ptr`), or `None` if every detected level is within its declared
-/// bound.
+/// Compare `detected` against `declared`, category by category.
+///
+/// Returns the first violation found (categories are checked in a fixed
+/// order: `alloc`, `io`, `ptr`), or `None` if every detected level is
+/// within its declared bound.
 ///
 /// Categories are checked independently — this deliberately does not
 /// attempt to find *all* violations in one pass; the compile error for the
@@ -26,6 +27,7 @@ pub struct Violation {
 /// it and recompiling surfaces the next one if there is one. This mirrors
 /// how `rustc` itself generally reports one class of error before
 /// re-checking.
+#[must_use]
 pub fn check_subset(detected: &CapabilitySet, declared: &CapabilitySet) -> Option<Violation> {
     if detected.alloc_or_none().risk_level() > declared.alloc_or_none().risk_level() {
         return Some(Violation {
@@ -54,7 +56,7 @@ pub fn check_subset(detected: &CapabilitySet, declared: &CapabilitySet) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::{AllocLevel, IoLevel, PtrLevel};
+    use crate::vocabulary::{AllocLevel, IoLevel, PtrLevel};
 
     #[test]
     fn no_violation_when_detected_is_within_declared_bounds() {

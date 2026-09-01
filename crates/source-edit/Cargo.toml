@@ -1,0 +1,30 @@
+[package]
+name = "rusty-source-edit"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Internal-only surgical source rewriting: replace exactly one syn::Item's byte span with a re-printed, mutated version of itself, leaving the rest of the file byte-identical. Shared by taint-generate and taint-refactor so neither silently reformats a whole file just to add one attribute or one call. Not published — no public-API guarantee."
+publish = false
+
+# Not `[lints] workspace = true` — Cargo forbids mixing `workspace = true`
+# with any lint overrides in the same crate, same as every other crate in
+# this workspace.
+[lints.clippy]
+all = "deny"
+pedantic = "deny"
+nursery = "deny"
+cargo = "deny"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin)'] }
+
+[lib]
+name = "source_edit"
+path = "src/lib.rs"
+
+[dependencies]
+syn = { version = "2", features = ["full"] }
+proc-macro2 = { version = "1", features = ["span-locations"] }
+prettyplease = "0.2"

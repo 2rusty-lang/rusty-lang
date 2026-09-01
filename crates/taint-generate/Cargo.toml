@@ -1,0 +1,37 @@
+[package]
+name = "rusty-taint-generate"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "Auto-writes #[capability(...)] (deterministic, from real body-usage detection) and #[sensitive(...)]/#[taint_sink(...)]/#[taint_sanitizer]/#[taint_check(labels=[...])] (heuristic, from naming keywords) directly into source files, for functions/mods that have no existing annotation of that kind. See docs/adr/ADR-0005-generate-and-refactor.md for the safety invariants this relies on."
+
+# Not `[lints] workspace = true` — Cargo forbids mixing `workspace = true`
+# with any lint overrides in the same crate, same as every other crate in
+# this workspace.
+[lints.clippy]
+all = "deny"
+pedantic = "deny"
+nursery = "deny"
+cargo = "deny"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin)'] }
+
+[lib]
+name = "taint_generate"
+path = "src/lib.rs"
+
+[[bin]]
+name = "taint-generate"
+path = "src/bin/taint-generate.rs"
+
+[dependencies]
+syn = { version = "2", features = ["full", "extra-traits", "visit"] }
+quote = "1"
+proc-macro2 = { version = "1", features = ["span-locations"] }
+rusty-capability-core = { path = "../capability-core", version = "0.1.0" }
+rusty-taint-check = { path = "../taint-check", version = "0.1.0" }
+rusty-source-edit = { path = "../source-edit", version = "0.1.0" }

@@ -1,9 +1,9 @@
 //! `BodyInspector` — a `syn::visit::Visit` walker that detects actual
-//! capability usage (allocation calls, I/O macros/paths, raw-pointer
-//! writes) inside a function body, per Phase 1 of
-//! `docs/aisecurity/capability-rfc-updated.md`.
+//! capability usage inside a function body.
 //!
-//! This is AST-level detection, not data-flow analysis: it recognizes
+//! Allocation calls, I/O macros/paths, raw-pointer writes, per Phase 1 of
+//! `docs/aisecurity/capability-rfc-updated.md`. This is AST-level
+//! detection, not data-flow analysis: it recognizes
 //! syntactic patterns (a call whose path ends in `Vec::new`, a `println!`
 //! macro invocation, a raw-pointer deref on the left of an assignment) —
 //! the same scope the RFC's own Phase 1 sketch describes. It cannot see
@@ -15,7 +15,7 @@ use path_match::{path_has_segment, path_last_two, path_to_string};
 use syn::visit::Visit;
 use syn::{Block, Expr, ExprAssign, ExprCall, ExprUnary, Macro, UnOp};
 
-use crate::parser::{AllocLevel, CapabilitySet, IoLevel, PtrBound, PtrLevel};
+use crate::vocabulary::{AllocLevel, CapabilitySet, IoLevel, PtrBound, PtrLevel};
 
 /// Walks a function body and accumulates the maximum capability level
 /// observed per category.
@@ -128,7 +128,7 @@ impl<'ast> Visit<'ast> for BodyInspector {
                 // Phase 1 has no address-range verification (that is the
                 // RFC's PAC-integration addon, out of scope here) — any
                 // detected raw write is conservatively classified `Any`,
-                // never `Bounded`. See parser.rs's `PtrBound` doc comment.
+                // never `Bounded`. See vocabulary.rs's `PtrBound` doc comment.
                 self.note_ptr(PtrLevel::Write(PtrBound::Any));
             }
             if PTR_READ_CALL_SUFFIXES.iter().any(|s| full.ends_with(s)) {
@@ -164,6 +164,7 @@ impl<'ast> Visit<'ast> for BodyInspector {
 
 /// Run [`BodyInspector`] over a function body and return the accumulated
 /// [`CapabilitySet`].
+#[must_use]
 pub fn inspect_body(block: &Block) -> CapabilitySet {
     let mut inspector = BodyInspector {
         detected: CapabilitySet::default(),

@@ -1,15 +1,20 @@
-//! `taint-check <file.rs> [file2.rs ...]`.
+//! `taint-check <file.rs> [file2.rs ...]` or `taint-check --crate
+//! <entry.rs>`.
 //!
 //! Runs [`crate::inspector`] outside the compiler, over one or more source
 //! files parsed with [`syn::parse_file`], for CI use with no proc-macro
 //! dependency (per `docs/adr/ADR-0001`'s original design and
-//! `docs/adr/ADR-0003`'s decision to build it).
+//! `docs/adr/ADR-0003`'s decision to build it). `--crate <entry.rs>`
+//! switches to [`crate::crate_scan`]'s whole-crate, cross-binding mode
+//! instead of scanning each given file independently — see that module's
+//! docs for what it does and does not track.
 //!
 //! Exit codes: `0` clean, `1` one or more violations found, `2` a usage or
 //! parse error (bad path, file doesn't parse as Rust, malformed
 //! attribute).
 
 use std::collections::HashSet;
+use std::path::Path;
 
 use syn::Item;
 
@@ -70,10 +75,40 @@ fn collect_from_item(item: &Item, violations: &mut Vec<Violation>) -> Result<(),
     }
 }
 
+fn run_crate_mode(entry: &str) -> i32 {
+    match crate::crate_scan::scan_crate(Path::new(entry)) {
+        Ok(violations) => {
+            for cv in &violations {
+                println!(
+                    "{}",
+                    crate::error::format_violation(&cv.violation, &cv.path.display().to_string())
+                );
+            }
+            i32::from(!violations.is_empty())
+        }
+        Err(message) => {
+            eprintln!("{message}");
+            2
+        }
+    }
+}
+
 /// Run the CLI over `args` (the process's own `argv`, `argv[0]` included —
 /// matches `std::env::args()`'s shape). Prints violations to stdout,
 /// errors to stderr, and returns the process exit code.
 pub fn run<I: IntoIterator<Item = String>>(args: I) -> i32 {
+    let args: Vec<String> = args.into_iter().collect();
+
+    if args.get(1).map(String::as_str) == Some("--crate") {
+        return args.get(2).map_or_else(
+            || {
+                eprintln!("usage: taint-check --crate <entry.rs>");
+                2
+            },
+            |entry| run_crate_mode(entry),
+        );
+    }
+
     let paths: Vec<String> = args.into_iter().skip(1).collect();
     if paths.is_empty() {
         eprintln!("usage: taint-check <file.rs> [file2.rs ...]");
@@ -244,6 +279,50 @@ mod tests {
         );
         let err = check_file(&file.path_str()).unwrap_err();
         assert!(err.contains("mod"));
+    }
+
+    #[test]
+    fn crate_mode_with_no_entry_path_is_a_usage_error() {
+        assert_eq!(
+            run(vec!["taint-check".to_string(), "--crate".to_string()]),
+            2
+        );
+    }
+
+    #[test]
+    fn crate_mode_finds_a_violation_via_the_real_binary_entry_point() {
+        let file = write_fixture(
+            r#"
+            #[taint_check(labels = [password])]
+            mod scope {
+                fn handle_login(#[sensitive(password)] password: &str) {
+                    log_debug(password);
+                }
+                #[taint_sink(password, policy = "no_sensitive")]
+                fn log_debug(msg: &str) {}
+            }
+            "#,
+        );
+        assert_eq!(
+            run(vec![
+                "taint-check".to_string(),
+                "--crate".to_string(),
+                file.path_str()
+            ]),
+            1
+        );
+    }
+
+    #[test]
+    fn crate_mode_reports_a_missing_entry_file_as_a_usage_error() {
+        assert_eq!(
+            run(vec![
+                "taint-check".to_string(),
+                "--crate".to_string(),
+                "/nonexistent/lib.rs".to_string()
+            ]),
+            2
+        );
     }
 
     #[test]

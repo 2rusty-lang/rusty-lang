@@ -1,0 +1,29 @@
+[package]
+name = "rusty-capability-core"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Internal-only capability vocabulary (AllocLevel/IoLevel/PtrLevel/CapabilitySet), body-usage inspector, and declared-vs-detected subset check shared by capability-attr and taint-generate. Not published — no public-API guarantee; extracted from capability-attr's own private modules, which a proc-macro = true crate could never expose to begin with."
+publish = false
+
+# Not `[lints] workspace = true` — Cargo forbids mixing `workspace = true`
+# with any lint overrides in the same crate, same as every other crate in
+# this workspace.
+[lints.clippy]
+all = "deny"
+pedantic = "deny"
+nursery = "deny"
+cargo = "deny"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin)'] }
+
+[lib]
+name = "capability_core"
+path = "src/lib.rs"
+
+[dependencies]
+syn = { version = "2", features = ["full", "extra-traits", "visit"] }
+rusty-path-match = { path = "../path-match", version = "0.1.0" }

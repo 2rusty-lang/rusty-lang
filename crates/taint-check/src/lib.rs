@@ -94,6 +94,7 @@
 )]
 
 pub mod cli;
+pub mod crate_scan;
 pub mod error;
 pub mod inspector;
 pub mod parser;

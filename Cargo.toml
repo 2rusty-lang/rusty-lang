@@ -1,10 +1,14 @@
 [workspace]
 members = [
     "crates/capability-attr",
+    "crates/capability-core",
     "crates/sensitive-ifc",
     "crates/path-match",
+    "crates/source-edit",
     "crates/taint-check",
     "crates/taint-check-macros",
+    "crates/taint-generate",
+    "crates/taint-refactor",
 ]
 resolver = "2"
 

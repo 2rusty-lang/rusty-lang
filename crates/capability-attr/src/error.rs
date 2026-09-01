@@ -1,12 +1,11 @@
-//! Renders a [`Violation`](crate::lattice::Violation) as a real
+//! Renders a [`Violation`](capability_core::Violation) as a real
 //! `compile_error!(...)` token stream, so a capability violation surfaces
 //! exactly like any other `rustc` compile error — same terminal output, same
 //! IDE red-squiggle behavior, no separate lint pass to opt into.
 
+use capability_core::Violation;
 use proc_macro2::TokenStream;
 use quote::quote_spanned;
-
-use crate::lattice::Violation;
 
 /// Build the `compile_error!(...)` token stream for `violation`, spanned at
 /// `fn_ident` so the error underlines the function's name.

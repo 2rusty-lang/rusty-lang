@@ -52,6 +52,7 @@ mod tests {
             sink_fn: "log_debug".to_string(),
             policy: "no_sensitive".to_string(),
             span: Span::call_site(),
+            arg_span: Span::call_site(),
         }
     }
 
