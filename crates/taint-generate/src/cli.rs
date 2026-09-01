@@ -11,58 +11,132 @@
 //! generated), `2` a usage or file error (bad path, file doesn't parse as
 //! Rust).
 
+use std::path::Path;
+
 use source_edit::{apply_edits, SourceEdit};
 use syn::File;
 
-use crate::{capability_gen, taint_gen};
+use crate::{capability_gen, manifest, taint_gen, top_level};
 
 struct FileResult {
     source: String,
     edits: Vec<SourceEdit>,
     capability_suggestions: Vec<capability_gen::CapabilitySuggestion>,
-    taint_suggestions: Vec<taint_gen::TaintSuggestion>,
+    capability_generation_skipped: bool,
+    /// The taint-attribute summary for this file's top-level functions
+    /// (the `mod foo;` layout — see `crate::taint_gen`'s module docs),
+    /// if anything was generated.
+    file_scope_taint_suggestion: Option<taint_gen::TaintSuggestion>,
+    /// The taint-attribute summaries for each eligible inline `mod { ... }`
+    /// found in this file.
+    inline_mod_taint_suggestions: Vec<taint_gen::TaintSuggestion>,
 }
 
-fn process(path: &str) -> Result<FileResult, String> {
+/// Infer a reportable "module name" from a file path, following Rust's own
+/// file-to-module convention (`lib.rs`/`main.rs`/`mod.rs` take their
+/// parent directory's name; anything else uses its own file stem) — used
+/// only for `--report` text, since there's no real `mod` item in a
+/// `mod foo;`-layout file to name it from.
+fn infer_mod_name(path: &Path) -> String {
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("mod")
+        .to_string();
+    if matches!(stem.as_str(), "mod" | "lib" | "main") {
+        path.parent()
+            .and_then(Path::file_name)
+            .and_then(|s| s.to_str())
+            .map_or(stem, ToString::to_string)
+    } else {
+        stem
+    }
+}
+
+fn read_and_parse(path: &str) -> Result<(String, File), String> {
     let source =
         std::fs::read_to_string(path).map_err(|e| format!("{path}: could not read file: {e}"))?;
     let file: File =
         syn::parse_file(&source).map_err(|e| format!("{path}: not valid Rust: {e}"))?;
+    Ok((source, file))
+}
 
-    let (mut edits, capability_suggestions) = capability_gen::generate(&source, &file);
-    let (taint_edits, taint_suggestions) = taint_gen::generate(&source, &file);
-    edits.extend(taint_edits);
+/// Process one already-parsed file. `batch_primary_label` is the label
+/// (if any) found across every file in this same `taint-generate`
+/// invocation — see [`top_level::generate`]'s docs for why sink detection
+/// needs it, not just this file's own scan.
+fn process(
+    path: &str,
+    source: String,
+    file: &File,
+    batch_primary_label: Option<&str>,
+) -> FileResult {
+    let file_path = Path::new(path);
+    let capability_extern_name = manifest::capability_attr_extern_name(file_path);
+    let mod_name = infer_mod_name(file_path);
 
-    Ok(FileResult {
+    let top = top_level::generate(
+        &source,
+        file,
+        &mod_name,
+        capability_extern_name.as_deref(),
+        batch_primary_label,
+    );
+    let mut edits = top.edits;
+
+    let (mod_edits, inline_mod_taint_suggestions) = taint_gen::generate(&source, file);
+    edits.extend(mod_edits);
+
+    FileResult {
         source,
         edits,
-        capability_suggestions,
-        taint_suggestions,
-    })
+        capability_suggestions: top.capability_suggestions,
+        capability_generation_skipped: top.capability_generation_skipped,
+        file_scope_taint_suggestion: top.taint_suggestion,
+        inline_mod_taint_suggestions,
+    }
+}
+
+fn print_taint_suggestion(path: &str, s: &taint_gen::TaintSuggestion) {
+    println!(
+        "{path}: mod {} -> #[taint_check(labels = [{}])]",
+        s.mod_name,
+        s.labels.join(", ")
+    );
+    for (fn_name, param, label) in &s.sensitive_params {
+        println!("{path}:   {fn_name}({param}) -> #[sensitive({label})]");
+    }
+    for (fn_name, label) in &s.sinks {
+        println!("{path}:   {fn_name} -> #[taint_sink({label}, policy = \"no_sensitive\")]");
+    }
+    for fn_name in &s.sanitizers {
+        println!("{path}:   {fn_name} -> #[taint_sanitizer]");
+    }
 }
 
 fn print_report(path: &str, result: &FileResult) {
+    if result.capability_generation_skipped {
+        println!(
+            "{path}: skipped #[capability(...)] generation — this crate's Cargo.toml doesn't depend on rusty-capability-attr"
+        );
+    }
     for s in &result.capability_suggestions {
         println!(
             "{path}: fn {} -> #[capability({})]",
             s.fn_name, s.rendered_attribute
         );
     }
-    for s in &result.taint_suggestions {
+    if let Some(s) = &result.file_scope_taint_suggestion {
+        print_taint_suggestion(path, s);
         println!(
-            "{path}: mod {} -> #[taint_check(labels = [{}])]",
-            s.mod_name,
-            s.labels.join(", ")
+            "{path}: NOTE — add #[taint_check(labels = [{}])] by hand to this file's `mod {};` \
+             declaration; this pass can't reach it, since that declaration lives in a different file",
+            s.labels.join(", "),
+            s.mod_name
         );
-        for (fn_name, param, label) in &s.sensitive_params {
-            println!("{path}:   {fn_name}({param}) -> #[sensitive({label})]");
-        }
-        for (fn_name, label) in &s.sinks {
-            println!("{path}:   {fn_name} -> #[taint_sink({label}, policy = \"no_sensitive\")]");
-        }
-        for fn_name in &s.sanitizers {
-            println!("{path}:   {fn_name} -> #[taint_sanitizer]");
-        }
+    }
+    for s in &result.inline_mod_taint_suggestions {
+        print_taint_suggestion(path, s);
     }
 }
 
@@ -100,14 +174,26 @@ pub fn run<I: IntoIterator<Item = String>>(args: I) -> i32 {
         return 2;
     }
 
+    let mut parsed = Vec::with_capacity(paths.len());
     for path in &paths {
-        let result = match process(path) {
-            Ok(r) => r,
+        match read_and_parse(path) {
+            Ok((source, file)) => parsed.push((path, source, file)),
             Err(message) => {
                 eprintln!("{message}");
                 return 2;
             }
-        };
+        }
+    }
+
+    // A label found in any one file here is visible to sink/sanitizer
+    // detection in every other file of this same run — see
+    // `top_level::generate`'s docs.
+    let batch_primary_label = parsed
+        .iter()
+        .find_map(|(_, _, file)| taint_gen::find_labels(file).into_iter().next());
+
+    for (path, source, file) in parsed {
+        let result = process(path, source, &file, batch_primary_label.as_deref());
 
         if report {
             print_report(path, &result);
@@ -137,33 +223,61 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    struct TempFile(PathBuf);
+    /// A target `.rs` file inside its own throwaway crate directory (a
+    /// `Cargo.toml` depending on `rusty-capability-attr` alongside it) —
+    /// `capability_gen` generation only fires when that dependency
+    /// resolves, so most of these tests need one. [`TempFile::bare`] skips
+    /// the manifest for tests specifically about that gate.
+    struct TempFile {
+        dir: PathBuf,
+        file: PathBuf,
+    }
 
     impl TempFile {
-        fn new(contents: &str) -> Self {
+        fn unique_dir() -> PathBuf {
             static COUNTER: AtomicU64 = AtomicU64::new(0);
-            let mut path = std::env::temp_dir();
-            path.push(format!(
-                "rusty-taint-generate-test-{}-{}.rs",
+            let mut dir = std::env::temp_dir();
+            dir.push(format!(
+                "rusty-taint-generate-test-{}-{}",
                 std::process::id(),
                 COUNTER.fetch_add(1, Ordering::Relaxed)
             ));
-            std::fs::write(&path, contents).unwrap();
-            Self(path)
+            std::fs::create_dir_all(&dir).unwrap();
+            dir
+        }
+
+        fn new(contents: &str) -> Self {
+            let dir = Self::unique_dir();
+            std::fs::write(
+                dir.join("Cargo.toml"),
+                "[package]\nname = \"demo\"\n\n[dependencies]\nrusty-capability-attr = \"0.1.3\"\n",
+            )
+            .unwrap();
+            let file = dir.join("target.rs");
+            std::fs::write(&file, contents).unwrap();
+            Self { dir, file }
+        }
+
+        /// Same as [`Self::new`] but with no `Cargo.toml` at all.
+        fn bare(contents: &str) -> Self {
+            let dir = Self::unique_dir();
+            let file = dir.join("target.rs");
+            std::fs::write(&file, contents).unwrap();
+            Self { dir, file }
         }
 
         fn path_str(&self) -> String {
-            self.0.to_string_lossy().into_owned()
+            self.file.to_string_lossy().into_owned()
         }
 
         fn read(&self) -> String {
-            std::fs::read_to_string(&self.0).unwrap()
+            std::fs::read_to_string(&self.file).unwrap()
         }
     }
 
     impl Drop for TempFile {
         fn drop(&mut self) {
-            let _ = std::fs::remove_file(&self.0);
+            let _ = std::fs::remove_dir_all(&self.dir);
         }
     }
 
@@ -178,7 +292,74 @@ mod tests {
         assert_eq!(run(vec!["taint-generate".to_string(), file.path_str()]), 0);
         assert!(file
             .read()
-            .contains("#[capability(alloc(none), io(display), ptr(none))]"));
+            .contains("#[rusty_capability_attr::capability(alloc(none), io(display), ptr(none))]"));
+    }
+
+    #[test]
+    fn capability_generation_is_skipped_without_a_cargo_toml() {
+        let file = TempFile::bare("fn log_message(msg: &str) {\n    println!(\"{msg}\");\n}\n");
+        assert_eq!(run(vec!["taint-generate".to_string(), file.path_str()]), 0);
+        // Nothing to generate at all (no taint labels either), so the file
+        // is left completely untouched rather than getting a bare,
+        // non-compiling `#[capability(...)]`.
+        assert_eq!(
+            file.read(),
+            "fn log_message(msg: &str) {\n    println!(\"{msg}\");\n}\n"
+        );
+    }
+
+    #[test]
+    fn run_generates_taint_attributes_for_a_top_level_mod_foo_layout_file() {
+        // The multi-file `taint-check --crate` layout: no inline `mod`
+        // wrapper, so this file's own top-level items stand in for one.
+        let file = TempFile::bare(
+            "fn handle_login(password: &str) {\n    crate::logging::log_debug(password);\n}\n",
+        );
+        assert_eq!(run(vec!["taint-generate".to_string(), file.path_str()]), 0);
+        let rewritten = file.read();
+        assert!(rewritten.contains("#[sensitive(password)]"));
+        // No inline `mod` exists to attach `#[taint_check(...)]` to.
+        assert!(!rewritten.contains("#[taint_check"));
+    }
+
+    #[test]
+    fn a_sink_in_a_separate_file_is_tagged_using_the_other_files_label() {
+        // The realistic `mod foo;` multi-file layout: `password` is only
+        // ever a sensitive param in one file, and the sink function lives
+        // in a separate file passed in the same invocation.
+        let auth =
+            TempFile::bare("fn handle_login(password: &str) {\n    log_debug(password);\n}\n");
+        let logging = TempFile::bare("fn log_debug(msg: &str) {\n    println!(\"{msg}\");\n}\n");
+
+        assert_eq!(
+            run(vec![
+                "taint-generate".to_string(),
+                auth.path_str(),
+                logging.path_str()
+            ]),
+            0
+        );
+
+        assert!(auth.read().contains("#[sensitive(password)]"));
+        assert!(logging
+            .read()
+            .contains("#[taint_sink(password, policy = \"no_sensitive\")]"));
+    }
+
+    #[test]
+    fn report_notes_the_manual_taint_check_step_for_a_top_level_layout_file() {
+        let file = TempFile::bare(
+            "fn handle_login(password: &str) {\n    crate::logging::log_debug(password);\n}\n",
+        );
+        assert_eq!(
+            run(vec![
+                "taint-generate".to_string(),
+                "--dry-run".to_string(),
+                "--report".to_string(),
+                file.path_str()
+            ]),
+            0
+        );
     }
 
     #[test]

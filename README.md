@@ -56,7 +56,7 @@ See [`crates/taint-check`'s README](crates/taint-check/README.md) for the
 
 ```sh
 cargo install rusty-taint-generate rusty-taint-refactor
-taint-generate src/auth.rs                     # populate missing attributes
+taint-generate src/auth.rs src/logging.rs      # populate missing attributes (sink/label may span files)
 taint-check --crate src/lib.rs                 # find a violation
 taint-refactor --dry-run --crate src/lib.rs    # preview a fix for every occurrence
 ```

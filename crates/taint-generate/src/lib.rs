@@ -45,4 +45,6 @@
 pub mod capability_gen;
 pub mod cli;
 pub mod heuristics;
+pub mod manifest;
 pub mod taint_gen;
+pub mod top_level;

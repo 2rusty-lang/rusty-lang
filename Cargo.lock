@@ -143,6 +143,7 @@ dependencies = [
  "rusty-source-edit",
  "rusty-taint-check",
  "syn 2.0.119",
+ "toml",
 ]
 
 [[package]]

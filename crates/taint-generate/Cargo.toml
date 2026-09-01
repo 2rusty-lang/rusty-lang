@@ -35,3 +35,6 @@ proc-macro2 = { version = "1", features = ["span-locations"] }
 rusty-capability-core = { path = "../capability-core", version = "0.1.0" }
 rusty-taint-check = { path = "../taint-check", version = "0.1.0" }
 rusty-source-edit = { path = "../source-edit", version = "0.1.0" }
+# Parses the target file's nearest `Cargo.toml` to find the real extern
+# crate name for `rusty-capability-attr` — see `crate::manifest`.
+toml = "1"
