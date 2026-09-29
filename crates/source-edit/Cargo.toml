@@ -1,6 +1,6 @@
 [package]
 name = "rusty-source-edit"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -31,4 +31,4 @@ prettyplease = "0.2"
 # Dogfooding: this crate's own functions carry #[capability(...)], the
 # same attribute `taint-generate` (source-edit's own consumer) writes for
 # everyone else — see docs/adr/ADR-0002.
-rusty-capability-attr = { path = "../capability-attr", version = "0.1.3" }
+rusty-capability-attr = { path = "../capability-attr", version = "0.2.0" }
