@@ -11,13 +11,16 @@
 //!
 //! - [`vocabulary`] — [`vocabulary::CapabilitySet`] and its three
 //!   category types ([`vocabulary::AllocLevel`], [`vocabulary::IoLevel`],
-//!   [`vocabulary::PtrLevel`]/[`vocabulary::PtrBound`]).
+//!   [`vocabulary::PtrLevel`]/[`vocabulary::PtrBound`]), plus
+//!   [`vocabulary::CapabilityCeiling`]/[`vocabulary::IoCeiling`] for a
+//!   mod-/crate-level declaration (`rfcs/0008-capability-mod-and-crate-level.md`).
 //! - [`inspector`] — [`inspector::BodyInspector`]/[`inspector::inspect_body`],
 //!   the `syn::visit::Visit` walker that detects actual capability usage in
 //!   a function body.
 //! - [`lattice`] — [`lattice::Violation`]/[`lattice::check_subset`], the
 //!   declared-vs-detected comparison `capability-attr` uses to decide
-//!   whether to emit a `compile_error!`.
+//!   whether to emit a `compile_error!`, plus [`lattice::check_ceiling`]
+//!   for a mod-/crate-level [`vocabulary::CapabilityCeiling`].
 
 #![warn(missing_docs)]
 #![allow(
@@ -30,6 +33,8 @@ pub mod lattice;
 pub mod render;
 pub mod vocabulary;
 
-pub use lattice::{check_subset, Violation};
-pub use render::render_capability_args;
-pub use vocabulary::{AllocLevel, CapabilitySet, IoLevel, PtrBound, PtrLevel};
+pub use lattice::{check_ceiling, check_subset, Violation};
+pub use render::{render_capability_args, render_capability_ceiling, render_io_ceiling};
+pub use vocabulary::{
+    AllocLevel, CapabilityCeiling, CapabilitySet, IoCeiling, IoLevel, PtrBound, PtrLevel,
+};

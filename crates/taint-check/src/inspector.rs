@@ -125,6 +125,7 @@ pub(crate) struct TaintContext<'a> {
 ///
 /// Returns `Err` if a `#[taint_sink(...)]` attribute fails to parse, or
 /// names a label not present in `declared_labels`.
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 pub(crate) fn register_fn_sink_or_sanitizer(
     f: &ItemFn,
     declared_labels: &[String],
@@ -166,6 +167,7 @@ pub(crate) fn register_fn_sink_or_sanitizer(
 /// # Errors
 ///
 /// See [`register_fn_sink_or_sanitizer`].
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 pub(crate) fn register_sinks_and_sanitizers(
     items: &[Item],
     declared_labels: &[String],
@@ -192,22 +194,20 @@ pub(crate) fn register_sinks_and_sanitizers(
 /// Returns `Err` if a `#[sensitive(...)]` / `#[taint_sink(...)]` attribute
 /// fails to parse, or if a `#[taint_sink]` names a label not present in
 /// `declared_labels`.
+#[capability_attr::capability(alloc(heap), io(none), ptr(none))]
 pub fn inspect_mod(item_mod: &ItemMod, declared_labels: &[String]) -> syn::Result<Vec<Violation>> {
     let Some((_, items)) = &item_mod.content else {
         return Ok(Vec::new());
     };
-
     let mut sinks: HashMap<String, SinkInfo> = HashMap::new();
     let mut sanitizers: HashSet<String> = HashSet::new();
     register_sinks_and_sanitizers(items, declared_labels, &mut sinks, &mut sanitizers)?;
-
     let empty_fn_defs = HashMap::new();
     let ctx = TaintContext {
         sinks: &sinks,
         sanitizers: &sanitizers,
         fn_defs: &empty_fn_defs,
     };
-
     let mut violations = Vec::new();
     for item in items {
         let Item::Fn(f) = item else { continue };
@@ -224,6 +224,7 @@ pub fn inspect_mod(item_mod: &ItemMod, declared_labels: &[String]) -> syn::Resul
 /// # Errors
 ///
 /// Returns `Err` if a `#[sensitive(...)]` attribute fails to parse.
+#[capability_attr::capability(alloc(heap), io(none), ptr(none))]
 pub(crate) fn inspect_fn_with_ctx(f: &ItemFn, ctx: &TaintContext) -> syn::Result<Vec<Violation>> {
     let mut tainted: HashMap<String, String> = HashMap::new();
     for arg in &f.sig.inputs {
@@ -237,13 +238,13 @@ pub(crate) fn inspect_fn_with_ctx(f: &ItemFn, ctx: &TaintContext) -> syn::Result
             }
         }
     }
-
     let mut violations = Vec::new();
     let mut visiting = HashSet::new();
     walk_block(&f.block, &mut tainted, ctx, &mut visiting, &mut violations);
     Ok(violations)
 }
 
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 pub(crate) fn pat_ident_name(pat: &Pat) -> Option<String> {
     match pat {
         Pat::Ident(pi) => Some(pi.ident.to_string()),
@@ -252,6 +253,7 @@ pub(crate) fn pat_ident_name(pat: &Pat) -> Option<String> {
     }
 }
 
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 fn walk_block(
     block: &Block,
     tainted: &mut HashMap<String, String>,
@@ -269,7 +271,6 @@ fn walk_block(
                     ctx.sinks,
                     ctx.sanitizers,
                 ));
-
                 let Some(name) = pat_ident_name(&local.pat) else {
                     continue;
                 };
@@ -299,6 +300,7 @@ fn walk_block(
 /// which label? See this module's doc comment for exactly which shapes
 /// propagate. Any violation found *inside* an interprocedural summary
 /// (see [`classify_call`]) is appended to `violations`.
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 fn classify_init(
     expr: &Expr,
     tainted: &HashMap<String, String>,
@@ -333,6 +335,7 @@ fn classify_init(
 /// dynamic dispatch, cycle, or depth limit) falls back to the same
 /// conservative default `classify_init` always used — this can only ever
 /// *add* precision, never remove the existing safety net.
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 fn classify_call(
     call: &ExprCall,
     tainted: &HashMap<String, String>,
@@ -344,13 +347,11 @@ fn classify_call(
     if ctx.sanitizers.contains(&callee_name) {
         return None;
     }
-
     let (arg_index, label) = call
         .args
         .iter()
         .enumerate()
         .find_map(|(i, arg)| find_tainted_label(arg, tainted).map(|l| (i, l)))?;
-
     if visiting.len() < MAX_INTERPROCEDURAL_DEPTH && !visiting.contains(&callee_name) {
         if let Some(&callee_fn) = ctx.fn_defs.get(&callee_name) {
             visiting.insert(callee_name.clone());
@@ -359,8 +360,6 @@ fn classify_call(
             return if propagates { Some(label) } else { None };
         }
     }
-
-    // Unresolved callee, a cycle, or the depth limit: conservative default.
     Some(label)
 }
 
@@ -368,6 +367,7 @@ fn classify_call(
 /// at `arg_index` (the position that received the tainted argument at the
 /// call site), appending any violation found inside `f` to `violations`,
 /// and returning whether `f`'s tail expression still carries `label`.
+#[capability_attr::capability(alloc(heap), io(none), ptr(none))]
 fn summarize_fn(
     f: &ItemFn,
     arg_index: usize,
@@ -382,12 +382,9 @@ fn summarize_fn(
     let Some(param_name) = pat_ident_name(&pt.pat) else {
         return false;
     };
-
     let mut callee_tainted = HashMap::new();
     callee_tainted.insert(param_name, label.to_string());
-
     walk_block(&f.block, &mut callee_tainted, ctx, visiting, violations);
-
     tail_expr_carries_label(&f.block, &callee_tainted, label, ctx, visiting, violations)
 }
 
@@ -399,6 +396,7 @@ fn summarize_fn(
 /// taint forward", just asked about the implicit return slot instead of a
 /// named one. An explicit early `return expr;` is not tracked — see
 /// [`classify_call`]'s doc comment.
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 fn tail_expr_carries_label(
     block: &Block,
     tainted: &HashMap<String, String>,
@@ -420,6 +418,7 @@ fn tail_expr_carries_label(
 /// so a sink/sanitizer declared in this mod is recognized by name however
 /// its call site chooses to qualify the path (see `path_match`'s crate
 /// docs).
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 fn call_ident_name(call: &ExprCall) -> Option<String> {
     if let Expr::Path(p) = call.func.as_ref() {
         path_last_segment(&p.path)
@@ -448,6 +447,7 @@ impl<'ast> Visit<'ast> for PathFinder<'_> {
 
 /// Does `expr` reference (anywhere within it) a binding currently in
 /// `tainted`? Returns the first matching label found.
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 fn find_tainted_label(expr: &Expr, tainted: &HashMap<String, String>) -> Option<String> {
     let mut finder = PathFinder {
         tainted,
@@ -467,6 +467,7 @@ fn find_tainted_label(expr: &Expr, tainted: &HashMap<String, String>) -> Option<
 /// replace that broader check for anything else — an argument built via
 /// `format!`, string concatenation, or any other shape still needs the
 /// broad, conservative `find_tainted_label` scan below it.
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 fn is_directly_sanitized(expr: &Expr, sanitizers: &HashSet<String>) -> bool {
     match expr {
         Expr::Reference(r) => is_directly_sanitized(&r.expr, sanitizers),
@@ -513,6 +514,7 @@ impl<'ast> Visit<'ast> for SinkCallFinder<'_> {
 /// carries that sink's label, per the current `tainted` snapshot — except
 /// an argument that is itself a direct, inline sanitizer call (see
 /// [`is_directly_sanitized`]).
+#[capability_attr::capability(alloc(heap), io(none), ptr(none))]
 fn find_sink_violations(
     expr: &Expr,
     tainted: &HashMap<String, String>,
@@ -605,6 +607,46 @@ mod tests {
             r#"
             fn handle_login(#[sensitive(password)] password: &str) {
                 log_debug(redact(password));
+            }
+            #[taint_sanitizer]
+            fn redact(s: &str) -> String { "[REDACTED]".to_string() }
+            #[taint_sink(password, policy = "no_sensitive")]
+            fn log_debug(msg: &str) {}
+            "#,
+            &["password"],
+        );
+        assert!(violations.is_empty());
+    }
+
+    #[test]
+    fn a_nested_item_declaration_inside_the_body_is_ignored() {
+        // `struct Local;` inside the function body is a `Stmt::Item`, not
+        // a `Stmt::Local`/`Stmt::Expr` — `walk_block` must skip it rather
+        // than mis-handle it, while still finding the real violation on
+        // the next line.
+        let violations = inspect(
+            r#"
+            fn handle_login(#[sensitive(password)] password: &str) {
+                struct Local;
+                log_debug(password);
+            }
+            #[taint_sink(password, policy = "no_sensitive")]
+            fn log_debug(msg: &str) {}
+            "#,
+            &["password"],
+        );
+        assert_eq!(violations.len(), 1);
+    }
+
+    #[test]
+    fn sanitizer_clears_taint_through_a_parenthesized_inline_call() {
+        // `log_debug((redact(password)))` — `is_directly_sanitized` must
+        // see through the extra parens, the same as it already sees
+        // through a `&redact(password)` reference.
+        let violations = inspect(
+            r#"
+            fn handle_login(#[sensitive(password)] password: &str) {
+                log_debug((redact(password)));
             }
             #[taint_sanitizer]
             fn redact(s: &str) -> String { "[REDACTED]".to_string() }
@@ -904,6 +946,76 @@ mod tests {
         );
         let violations = inspect_fn_with_ctx(&caller, &ctx).unwrap();
         assert_eq!(violations.len(), 1);
+    }
+
+    #[test]
+    fn interprocedural_summary_does_not_propagate_through_a_callee_with_too_few_params() {
+        // `identity` takes zero parameters — a real arity mismatch against
+        // the call site, syntactically parseable even though it wouldn't
+        // actually compile. `summarize_fn` must report "does not
+        // propagate" (not panic) when the argument position it's asked
+        // about doesn't exist on the callee.
+        let identity = parse_fn(r"fn identity() -> i32 { 0 }");
+        let mut fn_defs: HashMap<String, &ItemFn> = HashMap::new();
+        fn_defs.insert("identity".to_string(), &identity);
+
+        let mut sinks = HashMap::new();
+        sinks.insert(
+            "log_debug".to_string(),
+            SinkInfo {
+                label: "password".to_string(),
+                policy: "no_sensitive".to_string(),
+            },
+        );
+        let sanitizers = HashSet::new();
+        let ctx = TaintContext {
+            sinks: &sinks,
+            sanitizers: &sanitizers,
+            fn_defs: &fn_defs,
+        };
+
+        let caller = parse_fn(
+            r"fn handle_login(#[sensitive(password)] password: &str) {
+                let copy = identity(password);
+                log_debug(copy);
+            }",
+        );
+        let violations = inspect_fn_with_ctx(&caller, &ctx).unwrap();
+        assert!(violations.is_empty());
+    }
+
+    #[test]
+    fn interprocedural_summary_does_not_propagate_through_a_non_ident_callee_param() {
+        // `identity`'s one parameter is a tuple pattern, not a single
+        // identifier `pat_ident_name` can name — `summarize_fn` must
+        // report "does not propagate", not panic.
+        let identity = parse_fn(r"fn identity((a, b): (&str, &str)) -> i32 { 0 }");
+        let mut fn_defs: HashMap<String, &ItemFn> = HashMap::new();
+        fn_defs.insert("identity".to_string(), &identity);
+
+        let mut sinks = HashMap::new();
+        sinks.insert(
+            "log_debug".to_string(),
+            SinkInfo {
+                label: "password".to_string(),
+                policy: "no_sensitive".to_string(),
+            },
+        );
+        let sanitizers = HashSet::new();
+        let ctx = TaintContext {
+            sinks: &sinks,
+            sanitizers: &sanitizers,
+            fn_defs: &fn_defs,
+        };
+
+        let caller = parse_fn(
+            r"fn handle_login(#[sensitive(password)] password: &str) {
+                let copy = identity(password);
+                log_debug(copy);
+            }",
+        );
+        let violations = inspect_fn_with_ctx(&caller, &ctx).unwrap();
+        assert!(violations.is_empty());
     }
 
     #[test]

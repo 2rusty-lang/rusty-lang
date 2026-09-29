@@ -16,6 +16,7 @@ use std::path::Path;
 
 use crate::patch::{self, PatchPlan};
 
+#[capability_attr::capability(alloc(none), io(display), ptr(none))]
 fn print_report(plan: &PatchPlan) {
     for p in &plan.patches {
         println!(
@@ -36,6 +37,7 @@ fn print_report(plan: &PatchPlan) {
     }
 }
 
+#[capability_attr::capability(alloc(none), io(display), ptr(none))]
 fn print_dry_run_preview(plan: &PatchPlan) {
     for (path, contents) in &plan.rewritten_sources {
         println!("=== {} (preview — not written) ===", path.display());
@@ -45,9 +47,9 @@ fn print_dry_run_preview(plan: &PatchPlan) {
 
 /// Run the CLI over `args` (the process's own `argv`, `argv[0]` included).
 /// Returns the process exit code.
+#[capability_attr::capability(alloc(none), io(filesystem), ptr(none))]
 pub fn run<I: IntoIterator<Item = String>>(args: I) -> i32 {
     let args: Vec<String> = args.into_iter().collect();
-
     let mut dry_run = false;
     let mut report = false;
     let mut entry: Option<&str> = None;
@@ -64,12 +66,10 @@ pub fn run<I: IntoIterator<Item = String>>(args: I) -> i32 {
         }
         i += 1;
     }
-
     let Some(entry) = entry else {
         eprintln!("usage: taint-refactor [--dry-run] [--report] --crate <entry.rs>");
         return 2;
     };
-
     let plan = match patch::generate_patches(Path::new(entry)) {
         Ok(plan) => plan,
         Err(message) => {
@@ -77,20 +77,16 @@ pub fn run<I: IntoIterator<Item = String>>(args: I) -> i32 {
             return 2;
         }
     };
-
     if report {
         print_report(&plan);
     }
-
     if plan.rewritten_sources.is_empty() {
         return 0;
     }
-
     if dry_run {
         print_dry_run_preview(&plan);
         return 0;
     }
-
     for (path, contents) in &plan.rewritten_sources {
         if let Err(e) = std::fs::write(path, contents) {
             eprintln!("{}: could not write file: {e}", path.display());
@@ -217,6 +213,79 @@ mod tests {
         let rewritten = std::fs::read_to_string(&auth).unwrap();
         assert!(rewritten.contains("__taint_refactor_redact_password"));
         syn::parse_file(&rewritten).unwrap();
+    }
+
+    #[test]
+    fn report_prints_both_a_patch_and_a_skipped_violation() {
+        let dir = TempDir::new();
+        // The inline mod's sink is deliberately named differently from
+        // `auth.rs`'s own `log_debug` — `crate_scan` registers sinks by
+        // bare function name in one crate-wide map, so two sinks sharing
+        // a name would collide and only one would survive registration,
+        // silently hiding the very "skipped" case this test is for.
+        let lib = dir.write(
+            "lib.rs",
+            "#[taint_check(labels = [password])]\nmod auth;\n#[taint_check(labels = [token])]\nmod inline {\n    fn handle_login(#[sensitive(token)] token: &str) {\n        log_token(token);\n    }\n    #[taint_sink(token, policy = \"no_sensitive\")]\n    fn log_token(msg: &str) {}\n}\n",
+        );
+        dir.write(
+            "auth.rs",
+            "fn handle_login(#[sensitive(password)] password: &str) {\n    log_debug(password);\n}\n#[taint_sink(password, policy = \"no_sensitive\")]\nfn log_debug(msg: &str) {}\n",
+        );
+
+        assert_eq!(
+            run(vec![
+                "taint-refactor".to_string(),
+                "--crate".to_string(),
+                path_str(&lib),
+                "--dry-run".to_string(),
+                "--report".to_string(),
+            ]),
+            0
+        );
+    }
+
+    #[test]
+    fn unrecognized_flags_are_ignored() {
+        let dir = TempDir::new();
+        let lib = dir.write("lib.rs", "fn plain() {}\n");
+        assert_eq!(
+            run(vec![
+                "taint-refactor".to_string(),
+                "--bogus".to_string(),
+                "--crate".to_string(),
+                path_str(&lib),
+            ]),
+            0
+        );
+    }
+
+    #[test]
+    fn write_failure_is_a_usage_error() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new();
+        let lib = dir.write(
+            "lib.rs",
+            r"
+            #[taint_check(labels = [password])]
+            mod auth;
+            ",
+        );
+        let auth = dir.write(
+            "auth.rs",
+            "fn handle_login(#[sensitive(password)] password: &str) {\n    log_debug(password);\n}\n#[taint_sink(password, policy = \"no_sensitive\")]\nfn log_debug(msg: &str) {}\n",
+        );
+        std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o444)).unwrap();
+
+        let result = run(vec![
+            "taint-refactor".to_string(),
+            "--crate".to_string(),
+            path_str(&lib),
+        ]);
+
+        std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        assert_eq!(result, 2);
     }
 
     #[test]

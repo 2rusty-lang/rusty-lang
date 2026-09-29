@@ -47,6 +47,7 @@ pub struct SourceEdit {
 /// Assumes LF (`\n`) line endings, matching every file this workspace's own
 /// tooling writes.
 #[must_use]
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 pub fn byte_offset(source: &str, line: usize, column: usize) -> usize {
     let mut offset = 0usize;
     for (idx, line_str) in source.split('\n').enumerate() {
@@ -54,13 +55,14 @@ pub fn byte_offset(source: &str, line: usize, column: usize) -> usize {
             let prefix_len: usize = line_str.chars().take(column).map(char::len_utf8).sum();
             return offset + prefix_len;
         }
-        offset += line_str.len() + 1; // the '\n' that `split` consumed
+        offset += line_str.len() + 1;
     }
     source.len()
 }
 
 /// The `[start, end)` byte range `span` covers in `source`.
 #[must_use]
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 pub fn span_byte_range(source: &str, span: Span) -> (usize, usize) {
     let start = span.start();
     let end = span.end();
@@ -74,6 +76,7 @@ pub fn span_byte_range(source: &str, span: Span) -> (usize, usize) {
 /// [`syn::File`]) via `prettyplease`, trimmed of its trailing newline so
 /// callers can splice it directly into a [`SourceEdit::replacement`].
 #[must_use]
+#[capability_attr::capability(alloc(heap), io(none), ptr(none))]
 pub fn print_item(item: &Item) -> String {
     let file = syn::File {
         shebang: None,
@@ -97,6 +100,7 @@ pub fn print_item(item: &Item) -> String {
 /// # Errors
 ///
 /// Returns `Err` if `text` isn't a single valid `#[...]` attribute.
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 pub fn parse_attribute(text: &str) -> syn::Result<Attribute> {
     let mut attrs = Attribute::parse_outer.parse_str(text)?;
     if attrs.len() != 1 {
@@ -117,10 +121,10 @@ pub fn parse_attribute(text: &str) -> syn::Result<Attribute> {
 /// every caller in this workspace produces at most one edit per top-level
 /// item).
 #[must_use]
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 pub fn apply_edits(source: &str, edits: &[SourceEdit]) -> String {
     let mut ordered: Vec<&SourceEdit> = edits.iter().collect();
     ordered.sort_by(|a, b| b.start.cmp(&a.start));
-
     let mut result = source.to_string();
     for edit in ordered {
         result.replace_range(edit.start..edit.end, &edit.replacement);
@@ -143,6 +147,12 @@ mod tests {
     fn byte_offset_handles_a_mid_line_column() {
         let source = "fn a() {}\nfn b() {}\n";
         assert_eq!(byte_offset(source, 2, 3), 13);
+    }
+
+    #[test]
+    fn byte_offset_falls_back_to_source_len_for_an_out_of_range_line() {
+        let source = "fn a() {}\nfn b() {}\n";
+        assert_eq!(byte_offset(source, 99, 0), source.len());
     }
 
     #[test]
@@ -175,6 +185,19 @@ mod tests {
     #[test]
     fn parse_attribute_rejects_malformed_text() {
         assert!(parse_attribute("not an attribute").is_err());
+    }
+
+    #[test]
+    fn parse_attribute_rejects_more_than_one_attribute() {
+        // Valid attribute syntax, but two of them — distinct from the
+        // "not parseable at all" case above: this fails the `len() != 1`
+        // check, not `Attribute::parse_outer` itself. `syn::Attribute`
+        // has no `Debug` impl, so this matches by hand instead of
+        // `.unwrap_err()`.
+        match parse_attribute("#[a] #[b]") {
+            Err(e) => assert!(e.to_string().contains("expected exactly one attribute")),
+            Ok(_) => panic!("expected an error"),
+        }
     }
 
     #[test]

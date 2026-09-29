@@ -79,24 +79,21 @@ pub struct PatchPlan {
 /// Returns `Err` with a human-readable message on a file-read failure or a
 /// Rust-syntax parse failure (from the underlying scan, or from re-reading
 /// a violated file to build its patch).
+#[capability_attr::capability(alloc(heap), io(filesystem), ptr(none))]
 pub fn generate_patches(entry: &Path) -> Result<PatchPlan, String> {
     let violations = scan_crate(entry)?;
-
     let mut by_path: HashMap<PathBuf, Vec<CrateViolation>> = HashMap::new();
     for v in violations {
         by_path.entry(v.path.clone()).or_default().push(v);
     }
-
     let mut rewritten_sources = HashMap::new();
     let mut patches = Vec::new();
     let mut skipped = Vec::new();
-
     for (path, path_violations) in by_path {
         let source = std::fs::read_to_string(&path)
             .map_err(|e| format!("{}: could not read file: {e}", path.display()))?;
         let file: File = syn::parse_file(&source)
             .map_err(|e| format!("{}: not valid Rust: {e}", path.display()))?;
-
         let mut by_fn_index: HashMap<usize, Vec<&CrateViolation>> = HashMap::new();
         for v in &path_violations {
             match find_top_level_fn_index(&file, v.violation.arg_span) {
@@ -110,17 +107,19 @@ pub fn generate_patches(entry: &Path) -> Result<PatchPlan, String> {
         if by_fn_index.is_empty() {
             continue;
         }
-
         let mut edits = Vec::new();
         let mut sanitizer_for_label: HashMap<String, String> = HashMap::new();
         let mut new_fns_text = String::new();
-
         for (fn_index, fn_violations) in by_fn_index {
+            // `fn_index` only ever came from `find_top_level_fn_index`'s
+            // own `Some(idx)` above, on this same, never-mutated `file` —
+            // by that function's own construction (`.position()` over a
+            // predicate that requires `Item::Fn`), `file.items[fn_index]`
+            // is always an `Item::Fn`, not a scenario worth a fallback for.
             let Item::Fn(original_fn) = &file.items[fn_index] else {
-                continue;
+                unreachable!("find_top_level_fn_index only ever returns an Item::Fn index");
             };
             let mut new_fn = original_fn.clone();
-
             for v in fn_violations {
                 let label = &v.violation.label;
                 let sanitizer_name = sanitizer_for_label
@@ -135,7 +134,6 @@ pub fn generate_patches(entry: &Path) -> Result<PatchPlan, String> {
                         name
                     })
                     .clone();
-
                 let mut wrapper = WrapAtSpan {
                     target: v.violation.arg_span,
                     sanitizer_name: &sanitizer_name,
@@ -151,7 +149,6 @@ pub fn generate_patches(entry: &Path) -> Result<PatchPlan, String> {
                     });
                 }
             }
-
             let (start, end) = span_byte_range(&source, original_fn.span());
             edits.push(SourceEdit {
                 start,
@@ -159,15 +156,13 @@ pub fn generate_patches(entry: &Path) -> Result<PatchPlan, String> {
                 replacement: print_item(&Item::Fn(new_fn)),
             });
         }
-
-        if edits.is_empty() {
-            continue;
-        }
+        // `edits` can't be empty here: the loop above only runs because
+        // `by_fn_index` was already confirmed non-empty, and every one of
+        // its iterations pushes exactly one edit unconditionally.
         let mut rewritten = apply_edits(&source, &edits);
         rewritten.push_str(&new_fns_text);
         rewritten_sources.insert(path, rewritten);
     }
-
     Ok(PatchPlan {
         rewritten_sources,
         patches,
@@ -175,6 +170,7 @@ pub fn generate_patches(entry: &Path) -> Result<PatchPlan, String> {
     })
 }
 
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 fn span_contains(outer: proc_macro2::Span, inner: proc_macro2::Span) -> bool {
     let (outer_start, outer_end) = (outer.start(), outer.end());
     let (inner_start, inner_end) = (inner.start(), inner.end());
@@ -182,6 +178,7 @@ fn span_contains(outer: proc_macro2::Span, inner: proc_macro2::Span) -> bool {
         && (inner_end.line, inner_end.column) <= (outer_end.line, outer_end.column)
 }
 
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 fn find_top_level_fn_index(file: &File, target: proc_macro2::Span) -> Option<usize> {
     file.items.iter().position(|item| match item {
         Item::Fn(f) => span_contains(f.span(), target),

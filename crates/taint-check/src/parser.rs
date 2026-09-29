@@ -50,6 +50,7 @@ impl Parse for TaintCheckArgs {
 /// # Errors
 ///
 /// Returns `Err` if the tokens aren't `labels = [ident, ident, ...]`.
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 pub fn parse_taint_check_args(args: TokenStream) -> syn::Result<TaintCheckArgs> {
     syn::parse2(args)
 }
@@ -87,18 +88,21 @@ impl Parse for SinkPolicy {
 
 /// `true` if `attr` is `#[sensitive(...)]`.
 #[must_use]
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 pub fn is_sensitive(attr: &Attribute) -> bool {
     attr.path().is_ident("sensitive")
 }
 
 /// `true` if `attr` is `#[taint_sink(...)]`.
 #[must_use]
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 pub fn is_taint_sink(attr: &Attribute) -> bool {
     attr.path().is_ident("taint_sink")
 }
 
 /// `true` if `attr` is `#[taint_sanitizer]`.
 #[must_use]
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 pub fn is_taint_sanitizer(attr: &Attribute) -> bool {
     attr.path().is_ident("taint_sanitizer")
 }
@@ -108,6 +112,7 @@ pub fn is_taint_sanitizer(attr: &Attribute) -> bool {
 /// # Errors
 ///
 /// Returns `Err` if the attribute's argument isn't a single identifier.
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 pub fn parse_sensitive_attr(attr: &Attribute) -> syn::Result<String> {
     let ident: Ident = attr.parse_args()?;
     Ok(ident.to_string())
@@ -118,6 +123,7 @@ pub fn parse_sensitive_attr(attr: &Attribute) -> syn::Result<String> {
 /// # Errors
 ///
 /// Returns `Err` if the arguments aren't `label, policy = "..."`.
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 pub fn parse_taint_sink_attr(attr: &Attribute) -> syn::Result<SinkPolicy> {
     attr.parse_args()
 }

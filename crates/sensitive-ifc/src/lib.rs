@@ -28,17 +28,22 @@
 //!
 //! This is a direct, workspace-local implementation of Phase 1 from
 //! `docs/aisecurity/ifc-rfc.md` (Information Flow Control RFC), adapted to
-//! this project's real target: a Rust rewrite of `git.git` (a userspace CLI
-//! tool, not embedded/bare-metal firmware — so, unlike the RFC's own
-//! generic/healthcare framing, this crate ships `std`, not `no_std`; the
-//! RFC's `Pii`/`Phi` example labels are dropped in favor of labels grounded
-//! in `git.git`'s actual credential-handling attack surface, see below).
+//! this project's real target: general-purpose userspace Rust software
+//! (a CLI tool, a network client, a service — not embedded/bare-metal
+//! firmware — so, unlike the RFC's own generic/healthcare framing, this
+//! crate ships `std`, not `no_std`; the RFC's `Pii`/`Phi` example labels
+//! are dropped in favor of labels grounded in a concrete credential-
+//! handling attack surface, see below).
 //!
 //! - **Phase 1 (this crate, stable Rust today):** pure type-system IFC.
 //!   [`Sensitive<T, L>`] deliberately does **not** implement [`fmt::Display`]
 //!   or `serde::Serialize` — passing a sensitive value to `println!`,
 //!   `format!`, or a JSON serializer is a compile error, not a runtime leak.
-//!   Zero proc-macro, zero extra tooling, zero runtime cost.
+//!   That enforcement itself needs zero proc-macro, zero extra tooling, zero
+//!   runtime cost — it's plain trait absence. (This crate separately depends
+//!   on `capability-attr` to dogfood `#[capability(...)]` on its own
+//!   functions; that dependency has no bearing on Phase 1's guarantee above,
+//!   which a caller gets for free just by using [`Sensitive<T, L>`].)
 //! - **Phase 2 (deferred, not built this pass):** `#[taint_check]` /
 //!   `#[sensitive(label)]` / `#[taint_sink(...)]` proc-macro-driven AST taint
 //!   propagation — catches taint that Phase 1 loses once
@@ -60,29 +65,29 @@
 //! intermediate variables after unwrapping, or any transformation performed
 //! by a function this crate doesn't know about. That is Phase 2/3 territory.
 //!
-//! # Labels — grounded in `git.git`'s real attack surface, not generic
-//! examples
+//! # Labels — grounded in a concrete attack surface, not generic examples
 //!
 //! The RFC's own example labels (`Password`, `SessionToken`, `Pii`, `Phi`)
 //! are generic/healthcare-framed. This crate's labels are instead grounded
-//! in concrete `git.git` subsystems that a Rust rewrite would actually
-//! touch:
+//! in concrete credential-handling subsystems that userspace software
+//! talking to a remote service actually has:
 //!
-//! - [`Credential`] — plaintext username/password material handled by
-//!   git's credential subsystem (`credential.c`'s helper protocol,
-//!   `.netrc`, URL-embedded userinfo like `https://user:pass@host/repo`).
+//! - [`Credential`] — plaintext username/password material handled by a
+//!   credential-helper protocol, a saved-credentials config file, or
+//!   URL-embedded userinfo (e.g. `https://user:pass@host/path`).
 //! - [`AuthToken`] — bearer/OAuth/personal-access-token material used for
-//!   HTTPS authentication (`http.c`/`remote-curl.c`'s `Authorization`
-//!   header construction). Kept distinct from [`Credential`] because tokens
+//!   HTTP(S) API authentication (an `Authorization` header, a stored
+//!   session token). Kept distinct from [`Credential`] because tokens
 //!   are often longer-lived and higher blast-radius if leaked into a log.
-//! - [`UntrustedRemoteInput`] — data received from a remote peer during
-//!   `fetch`/`clone`/`push` (ref names, capability strings, pack-protocol
-//!   responses in `connect.c`/`transport.c`) before it has been validated.
-//!   This is a taint *source* label, not just a "must be redacted" label:
-//!   the real-world risk is this data reaching command construction (e.g. a
-//!   `credential.helper` or `GIT_SSH_COMMAND` invocation) unsanitized —
-//!   the class of bug behind real historical git command-injection CVEs
-//!   (e.g. submodule-URL argument injection).
+//! - [`UntrustedRemoteInput`] — data received from a remote peer during a
+//!   network operation (a sync/handshake response, a server-supplied
+//!   identifier or capability string) before it has been validated. This
+//!   is a taint *source* label, not just a "must be redacted" label: the
+//!   real-world risk is this data reaching command construction (e.g. a
+//!   configured helper-process invocation built from a remote-supplied
+//!   string) unsanitized — the class of bug behind real historical
+//!   command-injection CVEs in tools that shell out based on
+//!   remote-supplied input.
 //!
 //! # Relationship to OS-level MAC (AppArmor/SELinux)
 //!
@@ -122,8 +127,8 @@ mod sealed {
 ///
 /// This is a deliberate scope decision for this pass: an open (non-sealed)
 /// trait would let any crate mint its own label with no review, undermining
-/// the "grounded in git.git's real attack surface, not generic examples"
-/// goal above. Widening this to an open/extensible label set is exactly the
+/// the "grounded in a concrete attack surface, not generic examples" goal
+/// above. Widening this to an open/extensible label set is exactly the
 /// kind of change that belongs in a future phase, once real usage surfaces
 /// a genuine need for it.
 pub trait TaintLabel: sealed::Sealed {
@@ -132,19 +137,21 @@ pub trait TaintLabel: sealed::Sealed {
     fn label_name() -> &'static str;
 }
 
-/// Plaintext username/password credential material — from `git`'s
-/// credential-helper protocol, `.netrc`, or URL-embedded userinfo.
+/// Plaintext username/password credential material — from a
+/// credential-helper protocol, a saved-credentials config file, or
+/// URL-embedded userinfo.
 pub struct Credential;
 
-/// Bearer/OAuth/personal-access-token material used for HTTPS
-/// authentication against a git remote.
+/// Bearer/OAuth/personal-access-token material used for HTTP(S) API
+/// authentication against a remote service.
 pub struct AuthToken;
 
-/// Data received from a remote git peer before it has been validated.
+/// Data received from a remote peer before it has been validated.
 ///
-/// Covers ref names, capability strings, pack-protocol responses — a taint
-/// *source*, tracked so it can be checked against sinks that build shell
-/// commands (credential helpers, `GIT_SSH_COMMAND`) or file paths.
+/// Covers server-supplied identifiers, capability strings, and protocol
+/// responses — a taint *source*, tracked so it can be checked against
+/// sinks that build shell commands (a configured helper process) or file
+/// paths.
 pub struct UntrustedRemoteInput;
 
 impl sealed::Sealed for Credential {}
@@ -259,8 +266,8 @@ impl<T> fmt::Debug for Redacted<T> {
 /// carries no data at all, only the type marker, so there is no wrapped
 /// value that could ever leak through a future `Display`/`Debug` bug in
 /// this crate.
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 pub fn redact<T, L: TaintLabel>(sensitive: Sensitive<T, L>) -> Redacted<T> {
-    // Explicitly discard the inner value — do not retain it in any form.
     let _ = sensitive.into_inner_explicitly();
     Redacted(PhantomData)
 }
@@ -269,6 +276,7 @@ pub fn redact<T, L: TaintLabel>(sensitive: Sensitive<T, L>) -> Redacted<T> {
 /// the common case for credentials/tokens read from a helper or config
 /// file.
 #[must_use]
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 pub fn redact_str<L: TaintLabel>(s: Sensitive<String, L>) -> Redacted<String> {
     redact(s)
 }

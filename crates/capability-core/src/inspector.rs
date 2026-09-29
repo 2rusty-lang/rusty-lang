@@ -10,6 +10,12 @@
 //! through indirection (a function pointer, a trait object call, a macro
 //! that itself expands to an allocating call) — that is explicitly Phase
 //! 2/3 territory (cross-function capability flow), not this pass's scope.
+//!
+//! [`IoLevel::Device`] has no marker list here and is never emitted by
+//! this walker — like [`PtrBound::Bounded`], it exists in the vocabulary
+//! to be *declared* (an opaque "some other hardware device" ceiling), not
+//! detected; there is no single crate/type-name convention to match a
+//! catch-all category against.
 
 use path_match::{path_has_segment, path_last_two, path_to_string};
 use syn::visit::Visit;
@@ -68,6 +74,17 @@ const ALLOCATING_CALL_SUFFIXES: &[&str] = &[
 
 /// Path segments (anywhere in the call path) that indicate filesystem I/O.
 const FILESYSTEM_PATH_MARKERS: &[&str] = &["fs"];
+/// Path segments that indicate persistent, OS-wide configuration access
+/// (the `winreg` crate is the common userspace Windows-registry binding).
+const REGISTRY_PATH_MARKERS: &[&str] = &["winreg", "RegKey"];
+/// Path segments that indicate serial-port I/O (the `serialport` crate).
+const SERIAL_PATH_MARKERS: &[&str] = &["serialport", "SerialPort"];
+/// Path segments that indicate USB device access (the `rusb`/`libusb`
+/// bindings).
+const USB_PATH_MARKERS: &[&str] = &["rusb", "libusb", "UsbContext", "DeviceHandle"];
+/// Path segments that indicate Bluetooth I/O (the `btleplug`/`bluer`
+/// crates).
+const BLUETOOTH_PATH_MARKERS: &[&str] = &["btleplug", "bluer", "bluetooth"];
 /// Path segments that indicate network I/O.
 const NETWORK_PATH_MARKERS: &[&str] = &["net", "TcpStream", "TcpListener", "reqwest"];
 /// Path segments that indicate subprocess spawning.
@@ -112,6 +129,30 @@ impl<'ast> Visit<'ast> for BodyInspector {
             {
                 self.note_io(IoLevel::Filesystem);
             }
+            if REGISTRY_PATH_MARKERS
+                .iter()
+                .any(|m| path_has_segment(&p.path, m))
+            {
+                self.note_io(IoLevel::Registry);
+            }
+            if SERIAL_PATH_MARKERS
+                .iter()
+                .any(|m| path_has_segment(&p.path, m))
+            {
+                self.note_io(IoLevel::Serial);
+            }
+            if USB_PATH_MARKERS
+                .iter()
+                .any(|m| path_has_segment(&p.path, m))
+            {
+                self.note_io(IoLevel::Usb);
+            }
+            if BLUETOOTH_PATH_MARKERS
+                .iter()
+                .any(|m| path_has_segment(&p.path, m))
+            {
+                self.note_io(IoLevel::Bluetooth);
+            }
             if NETWORK_PATH_MARKERS
                 .iter()
                 .any(|m| path_has_segment(&p.path, m))
@@ -140,10 +181,14 @@ impl<'ast> Visit<'ast> for BodyInspector {
     }
 
     fn visit_expr_assign(&mut self, assign: &'ast ExprAssign) {
-        if let Expr::Unary(ExprUnary {
-            op: UnOp::Deref(_), ..
-        }) = assign.left.as_ref()
-        {
+        let is_deref = matches!(
+            assign.left.as_ref(),
+            Expr::Unary(ExprUnary {
+                op: UnOp::Deref(_),
+                ..
+            })
+        );
+        if is_deref {
             // `*ptr = value;` — a raw-pointer write. Conservatively `Any`
             // for the same reason as the `ptr::write(...)` call case above.
             self.note_ptr(PtrLevel::Write(PtrBound::Any));
@@ -228,6 +273,41 @@ mod tests {
     }
 
     #[test]
+    fn detects_winreg_as_registry_io() {
+        let caps = detect(r"let _ = winreg::RegKey::predef(0);");
+        assert_eq!(caps.io_or_none(), IoLevel::Registry);
+    }
+
+    #[test]
+    fn detects_serialport_as_serial_io() {
+        let caps = detect(r#"let _ = serialport::new("COM1", 9600);"#);
+        assert_eq!(caps.io_or_none(), IoLevel::Serial);
+    }
+
+    #[test]
+    fn detects_rusb_as_usb_io() {
+        let caps = detect(r"let _ = rusb::Context::new();");
+        assert_eq!(caps.io_or_none(), IoLevel::Usb);
+    }
+
+    #[test]
+    fn detects_btleplug_as_bluetooth_io() {
+        let caps = detect(r"let _ = btleplug::platform::Manager::new();");
+        assert_eq!(caps.io_or_none(), IoLevel::Bluetooth);
+    }
+
+    #[test]
+    fn device_io_is_never_detected_automatically() {
+        // No marker list backs `IoLevel::Device` — it's declare-only, like
+        // `PtrBound::Bounded`. Even a call whose path literally contains
+        // the word "device" must not trip it, or the catch-all stops
+        // meaning "opaque, undetectable" and starts silently matching
+        // things it shouldn't.
+        let caps = detect(r"let _ = my_device::open();");
+        assert_eq!(caps.io_or_none(), IoLevel::None);
+    }
+
+    #[test]
     fn detects_raw_pointer_write_via_deref_assign() {
         let caps = detect("unsafe { *(p as *mut u32) = 1; }");
         assert_eq!(caps.ptr_or_none(), PtrLevel::Write(PtrBound::Any));
@@ -243,6 +323,19 @@ mod tests {
     fn detects_raw_pointer_read() {
         let caps = detect("let _v = unsafe { *p };");
         assert_eq!(caps.ptr_or_none(), PtrLevel::Read);
+    }
+
+    #[test]
+    fn detects_raw_pointer_read_via_ptr_read_call() {
+        let caps = detect("let _v = unsafe { core::ptr::read(p) };");
+        assert_eq!(caps.ptr_or_none(), PtrLevel::Read);
+    }
+
+    #[test]
+    fn a_macro_that_is_not_a_display_or_vec_family_detects_nothing() {
+        let caps = detect(r#"assert!(true, "message");"#);
+        assert_eq!(caps.io_or_none(), IoLevel::None);
+        assert_eq!(caps.alloc_or_none(), AllocLevel::None);
     }
 
     #[test]

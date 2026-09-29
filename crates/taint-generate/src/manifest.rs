@@ -4,11 +4,19 @@
 //! `#[capability(...)]` is a real proc-macro attribute — [`capability_gen`]
 //! can only write one that compiles if the crate the target file belongs
 //! to actually depends on `rusty-capability-attr`, and the name it must be
-//! written under depends on how that dependency is declared: a plain
-//! `rusty-capability-attr = "0.1.3"` line resolves in code as
-//! `rusty_capability_attr` (Cargo's default hyphen-to-underscore rule), but
-//! a renamed one (`capability_attr = { package = "rusty-capability-attr",
-//! ... }`) resolves as whatever key was chosen. Guessing either name
+//! written under depends on how that dependency is declared.
+//!
+//! **This is not simply the dependency's manifest key with hyphens turned
+//! to underscores** — that would be true only for a package with no
+//! explicit `[lib] name`. `rusty-capability-attr` itself sets `[lib] name
+//! = "capability_attr"`, so an un-renamed `rusty-capability-attr = "0.1.3"`
+//! dependency resolves in code as `capability_attr`, not
+//! `rusty_capability_attr` — confirmed by actually compiling both against
+//! the real crate (a plain string-comparison unit test against a fake
+//! manifest cannot catch this, since it never invokes rustc). A renamed
+//! dependency (`capability_attr = { package = "rusty-capability-attr",
+//! ... }`) still resolves as whatever key was chosen, since a rename
+//! always wins over the target's own `[lib] name`. Guessing either name
 //! wrong produces the exact same "cannot find attribute" failure this
 //! module exists to prevent, so [`capability_attr_extern_name`] reads the
 //! manifest instead of assuming.
@@ -20,6 +28,12 @@ use std::path::{Path, PathBuf};
 /// The package this module looks for in `[dependencies]`.
 const CAPABILITY_ATTR_PACKAGE: &str = "rusty-capability-attr";
 
+/// `rusty-capability-attr`'s own `[lib] name` — the extern crate name an
+/// **un-renamed** dependency on it resolves to. This is a fact about that
+/// one specific crate (see the module docs), not something derivable from
+/// the consuming crate's manifest key.
+const CAPABILITY_ATTR_LIB_NAME: &str = "capability_attr";
+
 /// Resolve the extern crate name `rusty-capability-attr` has in the crate
 /// `target_file` belongs to, if any.
 ///
@@ -30,26 +44,31 @@ const CAPABILITY_ATTR_PACKAGE: &str = "rusty-capability-attr";
 /// the dependency isn't declared — in every case, the safe response is
 /// "don't generate `#[capability(...)]` at all", not a guess.
 #[must_use]
+#[capability_attr::capability(alloc(none), io(filesystem), ptr(none))]
 pub fn capability_attr_extern_name(target_file: &Path) -> Option<String> {
     let manifest_path = find_manifest(target_file)?;
     let contents = std::fs::read_to_string(&manifest_path).ok()?;
     let table: toml::Table = contents.parse().ok()?;
     let deps = table.get("dependencies")?.as_table()?;
-
     for (key, value) in deps {
-        let package_name = value
+        let renamed = value
             .as_table()
             .and_then(|t| t.get("package"))
-            .and_then(|p| p.as_str())
-            .unwrap_or(key.as_str());
+            .and_then(|p| p.as_str());
+        let package_name = renamed.unwrap_or(key.as_str());
         if package_name == CAPABILITY_ATTR_PACKAGE {
-            return Some(key.replace('-', "_"));
+            return Some(if renamed.is_some() {
+                key.replace('-', "_")
+            } else {
+                CAPABILITY_ATTR_LIB_NAME.to_string()
+            });
         }
     }
     None
 }
 
 /// Search `start`'s directory, then every ancestor, for a `Cargo.toml`.
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 fn find_manifest(start: &Path) -> Option<PathBuf> {
     let mut dir = if start.is_dir() {
         Some(start)
@@ -103,13 +122,17 @@ mod tests {
 
     #[test]
     fn finds_a_plain_string_dependency_by_default_extern_name() {
+        // Un-renamed resolves as `rusty-capability-attr`'s own `[lib]
+        // name` ("capability_attr"), not this manifest's key mangled —
+        // see the module docs; confirmed against the real crate in
+        // `crates/taint-generate/src/cli.rs`'s integration tests.
         let dir = TempDir::new();
         dir.write_manifest(
             "[package]\nname = \"demo\"\n\n[dependencies]\nrusty-capability-attr = \"0.1.3\"\n",
         );
         assert_eq!(
             capability_attr_extern_name(&dir.file_path()),
-            Some("rusty_capability_attr".to_string())
+            Some("capability_attr".to_string())
         );
     }
 
@@ -121,7 +144,7 @@ mod tests {
         );
         assert_eq!(
             capability_attr_extern_name(&dir.file_path()),
-            Some("rusty_capability_attr".to_string())
+            Some("capability_attr".to_string())
         );
     }
 
@@ -169,7 +192,14 @@ mod tests {
         let nested_file = dir.0.join("src").join("nested").join("deep.rs");
         assert_eq!(
             capability_attr_extern_name(&nested_file),
-            Some("rusty_capability_attr".to_string())
+            Some("capability_attr".to_string())
         );
+    }
+
+    #[test]
+    fn find_manifest_accepts_a_directory_path_directly() {
+        let dir = TempDir::new();
+        dir.write_manifest("[package]\nname = \"demo\"\n");
+        assert_eq!(find_manifest(&dir.0), Some(dir.0.join("Cargo.toml")));
     }
 }

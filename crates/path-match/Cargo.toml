@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+readme = "README.md"
 description = "Internal-only syn::Path matching helpers shared by capability-attr and taint-check (trailing-segment / suffix / marker matching). Published only so those crates resolve from crates.io — no public-API/semver guarantee, extracted purely to de-duplicate private helpers neither crate ever exposed."
 
 # Not `[lints] workspace = true` — Cargo forbids mixing `workspace = true`

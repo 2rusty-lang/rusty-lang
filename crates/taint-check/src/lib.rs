@@ -32,9 +32,12 @@
 //! - **This crate's own `taint-check` CLI binary** (`src/bin/taint-check.rs`,
 //!   [`cli::run`]) — `syn::parse_file`s a target source file outside the
 //!   compiler and runs the identical [`inspector::inspect_mod`] pass
-//!   standalone, printing violations and exiting nonzero. No proc-macro
-//!   dependency required — useful for a CI step that scans files a crate
-//!   doesn't necessarily depend on `taint-check-macros` from.
+//!   standalone, printing violations and exiting nonzero. The *target*
+//!   being scanned needs no proc-macro dependency of its own — useful for
+//!   a CI step that scans files a crate doesn't necessarily depend on
+//!   `taint-check-macros` from. (This crate itself separately depends on
+//!   `capability-attr` to dogfood `#[capability(...)]` on its own
+//!   functions — unrelated to what the CLI requires of what it scans.)
 //!
 //! Both paths share every real line of inspection logic in this crate;
 //! only [`error`]'s two renderers ([`error::emit_violation`] for
@@ -105,6 +108,10 @@
     reason = "workspace-wide dependency-graph check, not something a single-crate pass can fix or meaningfully scope"
 )]
 
+pub mod capability_check;
+pub mod capability_derive;
+pub mod capability_manifest;
+pub mod capability_update;
 pub mod cli;
 pub mod crate_scan;
 pub mod error;

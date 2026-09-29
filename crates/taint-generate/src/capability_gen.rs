@@ -44,6 +44,7 @@ use syn::{Attribute, File, Item, ItemFn};
 /// `#[some_crate::capability(...)]`) so a previous run's own qualified
 /// output is still recognized as "already curated" on a second run.
 #[must_use]
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 pub fn is_capability_attr(attr: &Attribute) -> bool {
     attr.path()
         .segments
@@ -65,7 +66,7 @@ pub struct CapabilitySuggestion {
 ///
 /// Detection only, no edit yet. `attr_text` is the fully qualified
 /// attribute ready to splice in, e.g.
-/// `"#[rusty_capability_attr::capability(alloc(none), io(display),
+/// `"#[capability_attr::capability(alloc(none), io(display),
 /// ptr(none))]"`.
 pub struct CapabilityPlan {
     /// The function's name.
@@ -83,12 +84,12 @@ pub struct CapabilityPlan {
 /// `extern_name` is `None` (the target crate doesn't depend on
 /// `rusty-capability-attr` — see the module docs).
 #[must_use]
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 pub fn plan_for_fn(f: &ItemFn, extern_name: Option<&str>) -> Option<CapabilityPlan> {
     let extern_name = extern_name?;
     if f.attrs.iter().any(is_capability_attr) {
         return None;
     }
-
     let detected = capability_core::inspector::inspect_body(&f.block);
     let rendered = render_capability_args(&detected);
     let attr_text = format!("#[{extern_name}::capability({rendered})]");
@@ -105,6 +106,7 @@ pub fn plan_for_fn(f: &ItemFn, extern_name: Option<&str>) -> Option<CapabilityPl
 /// Unless `extern_name` is `None`, in which case nothing is generated at
 /// all — see the module docs.
 #[must_use]
+#[capability_attr::capability(alloc(heap), io(none), ptr(none))]
 pub fn generate(
     source: &str,
     file: &File,
@@ -112,7 +114,6 @@ pub fn generate(
 ) -> (Vec<SourceEdit>, Vec<CapabilitySuggestion>) {
     let mut edits = Vec::new();
     let mut suggestions = Vec::new();
-
     for item in &file.items {
         let Item::Fn(f) = item else { continue };
         let Some(plan) = plan_for_fn(f, extern_name) else {
@@ -121,10 +122,8 @@ pub fn generate(
         let Ok(attr) = parse_attribute(&plan.attr_text) else {
             continue;
         };
-
         let mut new_fn = f.clone();
         new_fn.attrs.push(attr);
-
         let (start, end) = span_byte_range(source, f.span());
         edits.push(SourceEdit {
             start,
@@ -136,7 +135,6 @@ pub fn generate(
             rendered_attribute: plan.rendered,
         });
     }
-
     (edits, suggestions)
 }
 
@@ -189,6 +187,21 @@ mod tests {
         let source = "fn log_message(msg: &str) {\n    println!(\"{msg}\");\n}\n";
         let file: File = syn::parse_str(source).unwrap();
         let (edits, suggestions) = generate(source, &file, None);
+        assert!(edits.is_empty());
+        assert!(suggestions.is_empty());
+    }
+
+    #[test]
+    fn skips_a_fn_when_the_extern_name_is_not_a_valid_identifier() {
+        // If `extern_name` (resolved from the target crate's Cargo.toml —
+        // see `crate::manifest`) ever isn't a valid Rust identifier, the
+        // rendered `#[1bad::capability(...)]` fails to parse — this must
+        // skip the function, not panic, the same "don't generate a
+        // non-compiling attribute" rule `generates_nothing_without_an_extern_name`
+        // already covers for the missing-dependency case.
+        let source = "fn log_message(msg: &str) {\n    println!(\"{msg}\");\n}\n";
+        let file: File = syn::parse_str(source).unwrap();
+        let (edits, suggestions) = generate(source, &file, Some("1bad"));
         assert!(edits.is_empty());
         assert!(suggestions.is_empty());
     }

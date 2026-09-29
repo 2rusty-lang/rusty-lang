@@ -15,8 +15,10 @@ files, for functions/mods that have no existing annotation of that kind.
   detected. Not a guess. Only generated when the target crate's own
   `Cargo.toml` actually depends on `rusty-capability-attr` — this pass
   resolves the real extern crate name from the manifest and writes the
-  attribute fully qualified (e.g. `#[rusty_capability_attr::capability(...)]`)
-  rather than bare, and skips generation entirely (reported under
+  attribute fully qualified (e.g. `#[capability_attr::capability(...)]`,
+  since that's `rusty-capability-attr`'s own `[lib] name`, not its package
+  name mangled — see `crate::manifest`'s module docs) rather than bare, and
+  skips generation entirely (reported under
   `--report`) if the dependency isn't there, since a bare `#[capability(...)]`
   in a crate that doesn't depend on it fails to compile.
 - **Taint attributes — heuristic.** There is no way to derive from a

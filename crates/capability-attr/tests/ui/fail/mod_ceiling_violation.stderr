@@ -1,0 +1,13 @@
+error: capability violation in `export_receipt`: body uses io(Filesystem), which the enclosing mod's ceiling does not permit (io(network: yes, filesystem: no, registry: no, serial: no, usb: no, bluetooth: no, display: no, device: no, process: no, any: no)) — widen the mod's #[capability(...)] ceiling, or give this function its own, more permissive #[capability(...)]
+  --> tests/ui/fail/mod_ceiling_violation.rs:10:12
+   |
+10 |     pub fn export_receipt(order: &str) {
+   |            ^^^^^^^^^^^^^^
+
+error[E0433]: failed to resolve: use of unresolved module or unlinked crate `handlers`
+  --> tests/ui/fail/mod_ceiling_violation.rs:16:5
+   |
+16 |     handlers::export_receipt("total: 42");
+   |     ^^^^^^^^ use of unresolved module or unlinked crate `handlers`
+   |
+   = help: if you wanted to use a crate named `handlers`, use `cargo add handlers` to add it to your `Cargo.toml`

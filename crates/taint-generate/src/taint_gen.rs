@@ -62,6 +62,7 @@ pub struct TaintSuggestion {
 /// `true` if `attr` is any of the four taint-related attributes this crate
 /// generates (`#[taint_check(...)]`, `#[sensitive(...)]`,
 /// `#[taint_sink(...)]`, `#[taint_sanitizer]`).
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 fn is_taint_attr(attr: &Attribute) -> bool {
     attr.path().is_ident("taint_check")
         || taint_check::parser::is_sensitive(attr)
@@ -80,6 +81,7 @@ impl<'ast> Visit<'ast> for HasTaintAttr {
     }
 }
 
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 fn already_annotated(m: &ItemMod) -> bool {
     let mut checker = HasTaintAttr(false);
     checker.visit_item_mod(m);
@@ -89,6 +91,7 @@ fn already_annotated(m: &ItemMod) -> bool {
 /// `true` if any top-level `fn` in `file` (or any of its parameters)
 /// already carries a taint attribute — the file-scope equivalent of
 /// [`already_annotated`]'s "curated, hands off entirely" rule.
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 fn any_top_level_fn_already_annotated(file: &File) -> bool {
     file.items.iter().any(|item| {
         let Item::Fn(f) = item else { return false };
@@ -131,11 +134,11 @@ pub struct FnTaintPlan {
 /// [`crate::top_level::generate`] on each file. Returns an empty `Vec` for
 /// an already-annotated file, same as [`scan_file_scope`].
 #[must_use]
+#[capability_attr::capability(alloc(heap), io(none), ptr(none))]
 pub fn find_labels(file: &File) -> Vec<String> {
     if any_top_level_fn_already_annotated(file) {
         return Vec::new();
     }
-
     let mut labels: Vec<String> = Vec::new();
     let mut seen_labels: HashSet<String> = HashSet::new();
     for item in &file.items {
@@ -172,16 +175,15 @@ pub fn find_labels(file: &File) -> Vec<String> {
 /// function was never given. The caller is expected to report that as a
 /// manual step — see `crate::cli`'s `--report` output.
 #[must_use]
+#[capability_attr::capability(alloc(heap), io(none), ptr(none))]
 pub fn scan_file_scope(file: &File, mod_name: &str) -> Option<TaintSuggestion> {
     if any_top_level_fn_already_annotated(file) {
         return None;
     }
-
     let labels = find_labels(file);
     if labels.is_empty() {
         return None;
     }
-
     let mut sensitive_params = Vec::new();
     for item in &file.items {
         let Item::Fn(f) = item else { continue };
@@ -196,7 +198,6 @@ pub fn scan_file_scope(file: &File, mod_name: &str) -> Option<TaintSuggestion> {
         }
     }
     let primary_label = labels[0].clone();
-
     let mut sinks = Vec::new();
     let mut sanitizers = Vec::new();
     for item in &file.items {
@@ -208,7 +209,6 @@ pub fn scan_file_scope(file: &File, mod_name: &str) -> Option<TaintSuggestion> {
             sinks.push((fn_name, primary_label.clone()));
         }
     }
-
     Some(TaintSuggestion {
         mod_name: mod_name.to_string(),
         labels,
@@ -226,6 +226,7 @@ pub fn scan_file_scope(file: &File, mod_name: &str) -> Option<TaintSuggestion> {
 /// `TaintSuggestion::labels[0]`, the same convention [`generate`] uses for
 /// naming a sink's policy label.
 #[must_use]
+#[capability_attr::capability(alloc(heap), io(none), ptr(none))]
 pub fn plan_for_fn(f: &ItemFn, primary_label: &str) -> Option<FnTaintPlan> {
     let mut sensitive_params = Vec::new();
     for arg in &f.sig.inputs {
@@ -237,16 +238,13 @@ pub fn plan_for_fn(f: &ItemFn, primary_label: &str) -> Option<FnTaintPlan> {
             sensitive_params.push((param_name, label.to_string()));
         }
     }
-
     let fn_name = f.sig.ident.to_string();
     let is_sanitizer = looks_like_sanitizer(&fn_name);
     let sink_label =
         (!is_sanitizer && looks_like_sink(&fn_name)).then(|| primary_label.to_string());
-
     if sensitive_params.is_empty() && !is_sanitizer && sink_label.is_none() {
         return None;
     }
-
     Some(FnTaintPlan {
         sensitive_params,
         sink_label,
@@ -254,10 +252,17 @@ pub fn plan_for_fn(f: &ItemFn, primary_label: &str) -> Option<FnTaintPlan> {
     })
 }
 
+// No `Pat::Type` arm: every caller passes `pt.pat` from a `FnArg::Typed`
+// (`syn::PatType`), whose own `.ty` field already consumes the pattern's
+// type-ascription slot — `syn` never nests a second `Pat::Type` inside
+// that `.pat` for any real function-argument syntax (confirmed against
+// `x`, `mut x`, `ref x`, `(a, b)`, `_`, `x @ y`, and `&x` parameter
+// patterns), so that arm could never fire and is folded into the
+// catch-all below instead of kept as unreachable-in-practice dead code.
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 fn pat_ident_name(pat: &Pat) -> Option<String> {
     match pat {
         Pat::Ident(pi) => Some(pi.ident.to_string()),
-        Pat::Type(pt) => pat_ident_name(&pt.pat),
         _ => None,
     }
 }
@@ -265,24 +270,27 @@ fn pat_ident_name(pat: &Pat) -> Option<String> {
 /// Scan `file`'s top-level mods and generate taint attributes for every one
 /// that has no taint-related attribute at all yet and contains at least
 /// one heuristically sensitive parameter.
+///
+/// # Panics
+///
+/// Never in practice: internally re-derives a mod's own already-confirmed
+/// `Some` content after cloning it, which cloning cannot turn into `None`.
 #[must_use]
+#[capability_attr::capability(alloc(heap), io(none), ptr(none))]
 pub fn generate(source: &str, file: &File) -> (Vec<SourceEdit>, Vec<TaintSuggestion>) {
     let mut edits = Vec::new();
     let mut suggestions = Vec::new();
-
     for item in &file.items {
         let Item::Mod(m) = item else { continue };
         if already_annotated(m) {
             continue;
         }
         let Some((_, children)) = &m.content else {
-            continue; // `mod foo;` (external file) — single-file pass only.
+            continue;
         };
-
         let mut labels: Vec<String> = Vec::new();
         let mut seen_labels: HashSet<String> = HashSet::new();
         let mut sensitive_params = Vec::new();
-
         for child in children {
             let Item::Fn(f) = child else { continue };
             for arg in &f.sig.inputs {
@@ -298,23 +306,23 @@ pub fn generate(source: &str, file: &File) -> (Vec<SourceEdit>, Vec<TaintSuggest
                 }
             }
         }
-
         if labels.is_empty() {
-            continue; // nothing to generate for this mod.
+            continue;
         }
         let primary_label = labels[0].clone();
-
         let mut sinks = Vec::new();
         let mut sanitizers = Vec::new();
         let mut new_mod = m.clone();
-        let Some((_, new_children)) = new_mod.content.as_mut() else {
-            continue; // unreachable: `new_mod` is a clone of `m`, checked `Some` above.
-        };
-
+        // `new_mod` is just a clone of `m`, whose `.content` was already
+        // confirmed `Some` by the `let Some((_, children)) = &m.content`
+        // check above — cloning can't turn that back into `None`.
+        let (_, new_children) = new_mod
+            .content
+            .as_mut()
+            .expect("m.content was already confirmed Some above");
         for child in new_children.iter_mut() {
             let Item::Fn(f) = child else { continue };
             let fn_name = f.sig.ident.to_string();
-
             for arg in &mut f.sig.inputs {
                 let FnArg::Typed(pt) = arg else { continue };
                 let Some(param_name) = pat_ident_name(&pt.pat) else {
@@ -326,7 +334,6 @@ pub fn generate(source: &str, file: &File) -> (Vec<SourceEdit>, Vec<TaintSuggest
                     }
                 }
             }
-
             if looks_like_sanitizer(&fn_name) {
                 if let Ok(attr) = parse_attribute("#[taint_sanitizer]") {
                     f.attrs.push(attr);
@@ -341,14 +348,12 @@ pub fn generate(source: &str, file: &File) -> (Vec<SourceEdit>, Vec<TaintSuggest
                 }
             }
         }
-
         let labels_list = labels.join(", ");
         if let Ok(taint_check_attr) =
             parse_attribute(&format!("#[taint_check(labels = [{labels_list}])]"))
         {
             new_mod.attrs.push(taint_check_attr);
         }
-
         let (start, end) = span_byte_range(source, m.span());
         edits.push(SourceEdit {
             start,
@@ -363,7 +368,6 @@ pub fn generate(source: &str, file: &File) -> (Vec<SourceEdit>, Vec<TaintSuggest
             sanitizers,
         });
     }
-
     (edits, suggestions)
 }
 
@@ -414,6 +418,26 @@ mod auth {
     }
 
     #[test]
+    fn generate_skips_a_non_ident_param_pattern_in_an_inline_mod_and_still_finds_the_rest() {
+        // Exercises both the label-detection pass and the rewrite pass's
+        // own "skip a pattern `pat_ident_name` can't name" branch, inside
+        // the inline-`mod { ... }` layout `generate` handles (distinct
+        // from `find_labels`'s `mod foo;`-layout counterpart above).
+        let source = r"
+mod auth {
+    fn handle_login((a, b): (&str, &str), password: &str) {
+        log_debug(password);
+    }
+    fn log_debug(msg: &str) {}
+}
+";
+        let file: File = syn::parse_str(source).unwrap();
+        let (edits, suggestions) = generate(source, &file);
+        assert_eq!(suggestions[0].sensitive_params.len(), 1);
+        assert!(edits[0].replacement.contains("#[sensitive(password)]"));
+    }
+
+    #[test]
     fn skips_a_mod_with_no_sensitive_looking_parameters() {
         let source = "mod plain {\n    fn add(a: i32, b: i32) -> i32 { a + b }\n}\n";
         let file: File = syn::parse_str(source).unwrap();
@@ -446,6 +470,36 @@ mod auth {
     }
 
     #[test]
+    fn find_labels_returns_empty_for_an_already_annotated_file() {
+        let source = "fn handle_login(#[sensitive(password)] password: &str) {}\n";
+        let file: File = syn::parse_str(source).unwrap();
+        assert!(find_labels(&file).is_empty());
+    }
+
+    #[test]
+    fn find_labels_skips_a_non_ident_param_pattern_and_still_finds_the_rest() {
+        // `(a, b): (&str, &str)` has no single identifier `pat_ident_name`
+        // can name — it must be skipped, not panic, while `password` on
+        // the next line is still found normally.
+        let source = "fn handle_login((a, b): (&str, &str), password: &str) {}\n";
+        let file: File = syn::parse_str(source).unwrap();
+        assert_eq!(find_labels(&file), vec!["password".to_string()]);
+    }
+
+    #[test]
+    fn a_self_receiver_does_not_confuse_the_already_annotated_check() {
+        // `any_top_level_fn_already_annotated` walks every parameter,
+        // including a `self` receiver — syntactically parseable at the
+        // top level via `syn` even though a real top-level `fn` (outside
+        // an `impl`/`trait`) could never actually take `self`. Whether it
+        // carries a taint attribute must still be checked without a panic.
+        let source =
+            "fn foo(&self) {}\nfn handle_login(#[sensitive(password)] password: &str) {}\n";
+        let file: File = syn::parse_str(source).unwrap();
+        assert!(find_labels(&file).is_empty());
+    }
+
+    #[test]
     fn scan_file_scope_finds_labels_in_a_file_with_no_inline_mod() {
         // The `mod foo;` layout `taint-check --crate` is built for: this
         // file's own top-level items already are that mod's children.
@@ -473,6 +527,22 @@ fn handle_login(password: &str) {
         let source = "fn handle_login(#[sensitive(password)] password: &str) {}\nfn unrelated(token: &str) {}\n";
         let file: File = syn::parse_str(source).unwrap();
         assert!(scan_file_scope(&file, "auth").is_none());
+    }
+
+    #[test]
+    fn scan_file_scope_skips_a_non_ident_param_pattern_and_still_finds_the_rest() {
+        let source = "fn handle_login((a, b): (&str, &str), password: &str) {}\n";
+        let file: File = syn::parse_str(source).unwrap();
+        let suggestion = scan_file_scope(&file, "auth").unwrap();
+        assert_eq!(suggestion.sensitive_params.len(), 1);
+    }
+
+    #[test]
+    fn scan_file_scope_also_finds_a_sanitizer_by_name() {
+        let source = "fn handle_login(password: &str) {}\nfn redact_value(s: &str) -> String { s.to_string() }\n";
+        let file: File = syn::parse_str(source).unwrap();
+        let suggestion = scan_file_scope(&file, "auth").unwrap();
+        assert_eq!(suggestion.sanitizers, vec!["redact_value".to_string()]);
     }
 
     #[test]
@@ -515,6 +585,29 @@ fn handle_login(password: &str) {
     #[test]
     fn plan_for_fn_returns_none_for_a_plain_function() {
         let file: File = syn::parse_str("fn add(a: i32, b: i32) -> i32 { a + b }").unwrap();
+        let Item::Fn(f) = &file.items[0] else {
+            panic!("expected a fn");
+        };
+        assert!(plan_for_fn(f, "password").is_none());
+    }
+
+    #[test]
+    fn plan_for_fn_skips_a_non_ident_param_pattern_and_still_finds_the_rest() {
+        let file: File =
+            syn::parse_str("fn handle_login((a, b): (&str, &str), password: &str) {}").unwrap();
+        let Item::Fn(f) = &file.items[0] else {
+            panic!("expected a fn");
+        };
+        let plan = plan_for_fn(f, "password").unwrap();
+        assert_eq!(
+            plan.sensitive_params,
+            vec![("password".to_string(), "password".to_string())]
+        );
+    }
+
+    #[test]
+    fn pat_ident_name_returns_none_for_a_wildcard_pattern() {
+        let file: File = syn::parse_str("fn f(_: i32) {}").unwrap();
         let Item::Fn(f) = &file.items[0] else {
             panic!("expected a fn");
         };

@@ -3,7 +3,7 @@ name = "rusty-sensitive-ifc"
 version = "0.1.1"
 edition.workspace = true
 rust-version.workspace = true
-description = "Layer 3 (semantic/policy safety) type-system Information Flow Control for Rust: Sensitive<T, L> / Redacted<T> newtypes that make it a compile error to accidentally Display or serialize classified data. Phase 1 (stable Rust, zero proc-macro) of the companion IFC RFC to SPEC-00045's capability-attr crate; see docs/aisecurity/ifc-rfc.md."
+description = "Layer 3 (semantic/policy safety) type-system Information Flow Control for Rust: Sensitive<T, L> / Redacted<T> newtypes that make it a compile error to accidentally Display or serialize classified data. Phase 1 (stable Rust) of the companion IFC RFC to SPEC-00045's capability-attr crate; see docs/aisecurity/ifc-rfc.md. Phase 1's own enforcement (the missing Display impl) needs no proc-macro; this crate separately depends on rusty-capability-attr to dogfood #[capability(...)] on its own functions, unrelated to that public-API guarantee."
 license.workspace = true
 repository.workspace = true
 readme = "README.md"
@@ -29,6 +29,12 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin)'] }
 [lib]
 name = "sensitive_ifc"
 path = "src/lib.rs"
+
+[dependencies]
+# Dogfooding: this crate's own functions carry #[capability(...)] — see
+# docs/adr/ADR-0002. Not needed for Phase 1's own enforcement (the missing
+# Display impl), which stays proc-macro-free; see this crate's own docs.
+rusty-capability-attr = { path = "../capability-attr", version = "0.1.3" }
 
 [dev-dependencies]
 trybuild = "1"

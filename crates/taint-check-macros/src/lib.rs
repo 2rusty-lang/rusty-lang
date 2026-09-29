@@ -69,13 +69,24 @@ use syn::Item;
 /// Only applies to `mod` items — see the crate-level docs of
 /// `rusty-taint-check` for why. See that crate's docs for the full
 /// shallow-tracking scope statement (what propagates and what doesn't).
+/// `#[cfg(not(tarpaulin_include))]`: this function takes a real
+/// `proc_macro::TokenStream`, confirmed unconstructable outside an active
+/// macro invocation ("procedural macro API is used outside of a
+/// procedural macro" — verified empirically, not assumed; see
+/// `capability-attr`'s own `capability` function for the same reasoning).
+/// `cargo test`'s coverage instrumentation runs in exactly that excluded
+/// context, so this is structurally unreachable by it. Real correctness
+/// coverage for this macro comes from `tests/ui.rs`'s `trybuild` fixtures
+/// instead, which compile it for real, as a genuinely separate process
+/// `cargo-tarpaulin` does not (and cannot) instrument.
+#[cfg(not(tarpaulin_include))]
 #[proc_macro_attribute]
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 pub fn taint_check(args: TokenStream, item: TokenStream) -> TokenStream {
     let labels = match taint_check::parser::parse_taint_check_args(args.into()) {
         Ok(parsed) => parsed.labels,
         Err(e) => return e.into_compile_error().into(),
     };
-
     let mut item_mod = match syn::parse::<Item>(item) {
         Ok(Item::Mod(m)) => m,
         Ok(other) => {
@@ -85,16 +96,16 @@ pub fn taint_check(args: TokenStream, item: TokenStream) -> TokenStream {
         }
         Err(e) => return e.into_compile_error().into(),
     };
-
     let violations = match taint_check::inspector::inspect_mod(&item_mod, &labels) {
         Ok(v) => v,
         Err(e) => return e.into_compile_error().into(),
     };
-
     if let Some(violation) = violations.first() {
         return taint_check::error::emit_violation(violation).into();
     }
-
     taint_check::rewrite::strip_helper_attrs(&mut item_mod);
-    quote::quote! { #item_mod }.into()
+    quote::quote! {
+        # item_mod
+    }
+    .into()
 }

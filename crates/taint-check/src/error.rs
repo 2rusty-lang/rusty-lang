@@ -11,6 +11,7 @@ use quote::quote_spanned;
 
 use crate::inspector::Violation;
 
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 fn message(violation: &Violation) -> String {
     format!(
         "taint violation: `{label}` reaches `{sink}` (policy \"{policy}\") without passing \
@@ -24,13 +25,17 @@ fn message(violation: &Violation) -> String {
 /// Build the `compile_error!(...)` token stream for `violation`, spanned at
 /// the offending call site.
 #[must_use]
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 pub fn emit_violation(violation: &Violation) -> TokenStream {
     let msg = message(violation);
-    quote_spanned! { violation.span => compile_error!(#msg); }
+    quote_spanned! {
+        violation.span => compile_error!(# msg);
+    }
 }
 
 /// Render `violation` as a single `path:line:column: ...` line for the CLI.
 #[must_use]
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 pub fn format_violation(violation: &Violation, path: &str) -> String {
     let start = violation.span.start();
     format!(

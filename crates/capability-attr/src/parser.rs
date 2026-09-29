@@ -8,9 +8,11 @@
 //! vocabulary and its risk ordering. This module only owns parsing this
 //! macro's specific surface syntax into those types.
 
-use capability_core::{AllocLevel, CapabilitySet, IoLevel, PtrBound, PtrLevel};
+use capability_core::{
+    AllocLevel, CapabilityCeiling, CapabilitySet, IoCeiling, IoLevel, PtrBound, PtrLevel,
+};
 use proc_macro2::TokenStream;
-use syn::parse::Parser;
+use syn::parse::{ParseStream, Parser};
 use syn::punctuated::Punctuated;
 use syn::{Ident, Meta, Token};
 
@@ -110,13 +112,18 @@ fn parse_io_level(list: &syn::MetaList) -> syn::Result<IoLevel> {
         "none" => Ok(IoLevel::None),
         "display" => Ok(IoLevel::Display),
         "filesystem" => Ok(IoLevel::Filesystem),
+        "registry" => Ok(IoLevel::Registry),
+        "serial" => Ok(IoLevel::Serial),
+        "usb" => Ok(IoLevel::Usb),
+        "bluetooth" => Ok(IoLevel::Bluetooth),
         "network" => Ok(IoLevel::Network),
+        "device" => Ok(IoLevel::Device),
         "process" => Ok(IoLevel::Process),
         "any" => Ok(IoLevel::Any),
         other => Err(syn::Error::new_spanned(
             ident,
             format!(
-                "unknown io level `{other}` (expected `none`, `display`, `filesystem`, `network`, `process`, or `any`)"
+                "unknown io level `{other}` (expected `none`, `display`, `filesystem`, `registry`, `serial`, `usb`, `bluetooth`, `network`, `device`, `process`, or `any`)"
             ),
         )),
     }
@@ -137,6 +144,141 @@ fn parse_ptr_level(list: &syn::MetaList) -> syn::Result<PtrLevel> {
             "unknown ptr level (expected `none`, `read`, `any`, `write, bounded`, or `write, any`)",
         )),
     }
+}
+
+/// Parse the token stream inside a mod-/crate-level `#[capability(...)]`
+/// into a [`CapabilityCeiling`] — the RFC-0008 counterpart of
+/// [`parse_capability_args`].
+///
+/// Accepted surface syntax:
+///
+/// ```text
+/// #[capability(alloc(heap), io(network: yes, filesystem: no), ptr(none))]
+/// ```
+///
+/// `alloc`/`ptr` share the exact grammar and parsers `parse_capability_args`
+/// uses; only `io` differs, since a ceiling is set-valued (see
+/// `capability_core::vocabulary::IoCeiling`'s docs and
+/// `rfcs/0008-capability-mod-and-crate-level.md`).
+///
+/// # Errors
+///
+/// Same error shapes as [`parse_capability_args`], plus an unknown/
+/// duplicate `io` sub-category or a non-`yes`/`no` value.
+pub fn parse_capability_ceiling_args(args: TokenStream) -> syn::Result<CapabilityCeiling> {
+    let parser = Punctuated::<Meta, Token![,]>::parse_terminated;
+    let metas = parser.parse2(args)?;
+
+    let mut ceiling = CapabilityCeiling::default();
+    let mut alloc_seen = false;
+    let mut io_seen = false;
+    let mut ptr_seen = false;
+    for meta in metas {
+        let list = match &meta {
+            Meta::List(list) => list,
+            other => {
+                return Err(syn::Error::new_spanned(
+                    other,
+                    "expected `category(...)`, e.g. `alloc(none)` or `io(network: yes, ...)`",
+                ));
+            }
+        };
+        let category = list
+            .path
+            .get_ident()
+            .map(Ident::to_string)
+            .unwrap_or_default();
+
+        match category.as_str() {
+            "alloc" => {
+                ensure_not_duplicate(alloc_seen, &list.path, "alloc")?;
+                alloc_seen = true;
+                ceiling.alloc = Some(parse_alloc_level(list)?);
+            }
+            "io" => {
+                ensure_not_duplicate(io_seen, &list.path, "io")?;
+                io_seen = true;
+                ceiling.io = parse_io_ceiling(list)?;
+            }
+            "ptr" => {
+                ensure_not_duplicate(ptr_seen, &list.path, "ptr")?;
+                ptr_seen = true;
+                ceiling.ptr = Some(parse_ptr_level(list)?);
+            }
+            other => {
+                return Err(syn::Error::new_spanned(
+                    &list.path,
+                    format!(
+                        "unknown capability category `{other}` (expected `alloc`, `io`, or `ptr`)"
+                    ),
+                ));
+            }
+        }
+    }
+
+    Ok(ceiling)
+}
+
+/// Parse `network: yes, filesystem: no, display: no, process: no, any: no`
+/// (in any order, any subset — an omitted category defaults to `no`) into
+/// an [`IoCeiling`].
+fn parse_io_ceiling(list: &syn::MetaList) -> syn::Result<IoCeiling> {
+    fn parse(input: ParseStream) -> syn::Result<IoCeiling> {
+        let mut ceiling = IoCeiling::default();
+        let mut seen: Vec<String> = Vec::new();
+        while !input.is_empty() {
+            let key: Ident = input.parse()?;
+            input.parse::<Token![:]>()?;
+            let value: Ident = input.parse()?;
+            let permitted = match value.to_string().as_str() {
+                "yes" => true,
+                "no" => false,
+                other => {
+                    return Err(syn::Error::new_spanned(
+                        &value,
+                        format!("expected `yes` or `no`, found `{other}`"),
+                    ));
+                }
+            };
+
+            let key_str = key.to_string();
+            if seen.contains(&key_str) {
+                return Err(syn::Error::new_spanned(
+                    &key,
+                    format!("duplicate `{key_str}` in io ceiling"),
+                ));
+            }
+            seen.push(key_str.clone());
+
+            match key_str.as_str() {
+                "display" => ceiling.display = permitted,
+                "filesystem" => ceiling.filesystem = permitted,
+                "registry" => ceiling.registry = permitted,
+                "serial" => ceiling.serial = permitted,
+                "usb" => ceiling.usb = permitted,
+                "bluetooth" => ceiling.bluetooth = permitted,
+                "network" => ceiling.network = permitted,
+                "device" => ceiling.device = permitted,
+                "process" => ceiling.process = permitted,
+                "any" => ceiling.any = permitted,
+                other => {
+                    return Err(syn::Error::new_spanned(
+                        &key,
+                        format!(
+                            "unknown io ceiling category `{other}` (expected `display`, `filesystem`, `registry`, `serial`, `usb`, `bluetooth`, `network`, `device`, `process`, or `any`)"
+                        ),
+                    ));
+                }
+            }
+
+            if !input.is_empty() {
+                input.parse::<Token![,]>()?;
+            }
+        }
+        Ok(ceiling)
+    }
+
+    parse.parse2(list.tokens.clone())
 }
 
 #[cfg(test)]
@@ -203,5 +345,153 @@ mod tests {
         assert_eq!(reparsed.alloc_or_none(), original.alloc_or_none());
         assert_eq!(reparsed.io_or_none(), original.io_or_none());
         assert_eq!(reparsed.ptr_or_none(), original.ptr_or_none());
+    }
+
+    #[test]
+    fn parses_every_widened_io_level() {
+        for (word, level) in [
+            ("registry", IoLevel::Registry),
+            ("serial", IoLevel::Serial),
+            ("usb", IoLevel::Usb),
+            ("bluetooth", IoLevel::Bluetooth),
+            ("device", IoLevel::Device),
+        ] {
+            let ident = syn::Ident::new(word, proc_macro2::Span::call_site());
+            let set = parse_capability_args(quote! { io(#ident) }).unwrap();
+            assert_eq!(set.io_or_none(), level, "io({word})");
+        }
+    }
+
+    #[test]
+    fn unknown_io_level_is_a_parse_error() {
+        let err = parse_capability_args(quote! { io(spi) }).unwrap_err();
+        assert!(err.to_string().contains("unknown io level"));
+    }
+
+    #[test]
+    fn unknown_ptr_level_is_a_parse_error() {
+        let err = parse_capability_args(quote! { ptr(execute) }).unwrap_err();
+        assert!(err.to_string().contains("unknown ptr level"));
+    }
+
+    #[test]
+    fn duplicate_io_and_ptr_categories_are_parse_errors() {
+        assert!(parse_capability_args(quote! { io(none), io(display) })
+            .unwrap_err()
+            .to_string()
+            .contains("duplicate"));
+        assert!(parse_capability_args(quote! { ptr(none), ptr(read) })
+            .unwrap_err()
+            .to_string()
+            .contains("duplicate"));
+    }
+
+    #[test]
+    fn non_list_meta_is_a_parse_error() {
+        // `alloc` with no `(...)` at all — a bare path, not `category(level)`.
+        let err = parse_capability_args(quote! { alloc }).unwrap_err();
+        assert!(err.to_string().contains("expected `category(level)`"));
+    }
+
+    #[test]
+    fn parses_every_ceiling_io_category() {
+        let ceiling = parse_capability_ceiling_args(quote! {
+            alloc(heap),
+            io(display: yes, filesystem: no, registry: yes, serial: no, usb: yes, bluetooth: no, network: yes, device: no, any: no),
+            ptr(read)
+        })
+        .unwrap();
+        assert_eq!(ceiling.alloc_or_none(), AllocLevel::Heap);
+        assert_eq!(ceiling.ptr_or_none(), PtrLevel::Read);
+        assert!(ceiling.io.display);
+        assert!(!ceiling.io.filesystem);
+        assert!(ceiling.io.registry);
+        assert!(!ceiling.io.serial);
+        assert!(ceiling.io.usb);
+        assert!(!ceiling.io.bluetooth);
+        assert!(ceiling.io.network);
+        assert!(!ceiling.io.device);
+        assert!(!ceiling.io.any);
+    }
+
+    #[test]
+    fn ceiling_omitted_categories_default_to_no_and_none() {
+        let ceiling = parse_capability_ceiling_args(quote! {}).unwrap();
+        assert_eq!(ceiling.alloc_or_none(), AllocLevel::None);
+        assert_eq!(ceiling.ptr_or_none(), PtrLevel::None);
+        assert!(!ceiling.io.network);
+        assert!(!ceiling.io.any);
+    }
+
+    #[test]
+    fn ceiling_unknown_top_level_category_is_a_parse_error() {
+        let err = parse_capability_ceiling_args(quote! { register(write) }).unwrap_err();
+        assert!(err.to_string().contains("unknown capability category"));
+    }
+
+    #[test]
+    fn ceiling_duplicate_top_level_categories_are_parse_errors() {
+        assert!(
+            parse_capability_ceiling_args(quote! { alloc(none), alloc(heap) })
+                .unwrap_err()
+                .to_string()
+                .contains("duplicate")
+        );
+        assert!(
+            parse_capability_ceiling_args(quote! { io(network: yes), io(network: no) })
+                .unwrap_err()
+                .to_string()
+                .contains("duplicate")
+        );
+        assert!(
+            parse_capability_ceiling_args(quote! { ptr(none), ptr(read) })
+                .unwrap_err()
+                .to_string()
+                .contains("duplicate")
+        );
+    }
+
+    #[test]
+    fn ceiling_non_list_meta_is_a_parse_error() {
+        let err = parse_capability_ceiling_args(quote! { alloc }).unwrap_err();
+        assert!(err.to_string().contains("expected `category(...)`"));
+    }
+
+    #[test]
+    fn ceiling_io_rejects_a_non_yes_no_value() {
+        let err = parse_capability_ceiling_args(quote! { io(network: maybe) }).unwrap_err();
+        assert!(err.to_string().contains("expected `yes` or `no`"));
+    }
+
+    #[test]
+    fn ceiling_io_rejects_an_unknown_sub_category() {
+        let err = parse_capability_ceiling_args(quote! { io(spi: yes) }).unwrap_err();
+        assert!(err.to_string().contains("unknown io ceiling category"));
+    }
+
+    #[test]
+    fn ceiling_io_rejects_a_duplicate_sub_category() {
+        let err =
+            parse_capability_ceiling_args(quote! { io(network: yes, network: no) }).unwrap_err();
+        assert!(err.to_string().contains("duplicate"));
+    }
+
+    #[test]
+    fn ceiling_round_trips_through_capability_core_render() {
+        let original = CapabilityCeiling {
+            alloc: Some(AllocLevel::Heap),
+            io: IoCeiling {
+                network: true,
+                usb: true,
+                ..IoCeiling::default()
+            },
+            ptr: Some(PtrLevel::Read),
+        };
+        let rendered = capability_core::render_capability_ceiling(&original);
+        let tokens: proc_macro2::TokenStream = rendered.parse().unwrap();
+        let reparsed = parse_capability_ceiling_args(tokens).unwrap();
+        assert_eq!(reparsed.alloc_or_none(), original.alloc_or_none());
+        assert_eq!(reparsed.ptr_or_none(), original.ptr_or_none());
+        assert_eq!(reparsed.io, original.io);
     }
 }

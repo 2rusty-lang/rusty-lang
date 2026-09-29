@@ -18,7 +18,7 @@ nursery = "deny"
 cargo = "deny"
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin)'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin)', 'cfg(tarpaulin_include)'] }
 
 [lib]
 name = "taint_refactor"
@@ -34,3 +34,6 @@ quote = "1"
 proc-macro2 = { version = "1", features = ["span-locations"] }
 rusty-taint-check = { path = "../taint-check", version = "0.1.0" }
 rusty-source-edit = { path = "../source-edit", version = "0.1.0" }
+# Dogfooding: this crate's own functions carry #[capability(...)] — see
+# docs/adr/ADR-0002.
+rusty-capability-attr = { path = "../capability-attr", version = "0.1.3" }

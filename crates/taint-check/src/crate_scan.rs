@@ -76,9 +76,9 @@ pub struct CrateViolation {
 ///
 /// Returns `Err` with a human-readable message on a file-read failure, a
 /// Rust-syntax parse failure, or a malformed taint-check attribute.
+#[capability_attr::capability(alloc(heap), io(none), ptr(none))]
 pub fn scan_crate(entry: &Path) -> Result<Vec<CrateViolation>, String> {
     let files = resolve_files(entry)?;
-
     let mut declared_labels: Vec<String> = Vec::new();
     let mut seen_labels: HashSet<String> = HashSet::new();
     for (_, file) in &files {
@@ -87,7 +87,6 @@ pub fn scan_crate(entry: &Path) -> Result<Vec<CrateViolation>, String> {
     if declared_labels.is_empty() {
         return Ok(Vec::new());
     }
-
     let mut sinks: HashMap<String, SinkInfo> = HashMap::new();
     let mut sanitizers: HashSet<String> = HashSet::new();
     let mut fn_defs: HashMap<String, &ItemFn> = HashMap::new();
@@ -101,13 +100,11 @@ pub fn scan_crate(entry: &Path) -> Result<Vec<CrateViolation>, String> {
         )
         .map_err(|e| e.to_string())?;
     }
-
     let ctx = TaintContext {
         sinks: &sinks,
         sanitizers: &sanitizers,
         fn_defs: &fn_defs,
     };
-
     let mut violations = Vec::new();
     for (path, file) in &files {
         collect_violations(&file.items, &ctx, path, &mut violations).map_err(|e| e.to_string())?;
@@ -115,6 +112,7 @@ pub fn scan_crate(entry: &Path) -> Result<Vec<CrateViolation>, String> {
     Ok(violations)
 }
 
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 fn submodule_dir(file_path: &Path) -> PathBuf {
     let parent = file_path.parent().unwrap_or_else(|| Path::new("."));
     let is_root_style = matches!(
@@ -129,11 +127,17 @@ fn submodule_dir(file_path: &Path) -> PathBuf {
     }
 }
 
-fn resolve_files(entry: &Path) -> Result<Vec<(PathBuf, File)>, String> {
+/// Follow `mod foo;` declarations from `entry` to build the crate's whole
+/// module tree, returning every file found (including `entry` itself)
+/// alongside its parsed [`File`]. `pub(crate)` so
+/// [`crate::capability_derive`] (RFC 0007's declared-vs-derived check) can
+/// reuse the exact same file resolution [`scan_crate`] uses, rather than
+/// re-implementing `mod foo;` walking a second time.
+#[capability_attr::capability(alloc(heap), io(filesystem), ptr(none))]
+pub(crate) fn resolve_files(entry: &Path) -> Result<Vec<(PathBuf, File)>, String> {
     let mut files = Vec::new();
     let mut visited: HashSet<PathBuf> = HashSet::new();
     let mut queue = vec![entry.to_path_buf()];
-
     while let Some(path) = queue.pop() {
         if !visited.insert(path.clone()) {
             continue;
@@ -141,12 +145,10 @@ fn resolve_files(entry: &Path) -> Result<Vec<(PathBuf, File)>, String> {
         if files.len() >= MAX_FILES {
             break;
         }
-
         let source = std::fs::read_to_string(&path)
             .map_err(|e| format!("{}: could not read file: {e}", path.display()))?;
         let file: File = syn::parse_file(&source)
             .map_err(|e| format!("{}: not valid Rust: {e}", path.display()))?;
-
         let dir = submodule_dir(&path);
         for item in &file.items {
             if let Item::Mod(m) = item {
@@ -159,19 +161,15 @@ fn resolve_files(entry: &Path) -> Result<Vec<(PathBuf, File)>, String> {
                     } else if as_dir_mod.is_file() {
                         queue.push(as_dir_mod);
                     }
-                    // Not found at either conventional path — likely a
-                    // `#[path = "..."]` override, which this pass doesn't
-                    // honor. Skipped, not an error (see module docs).
                 }
             }
         }
-
         files.push((path, file));
     }
-
     Ok(files)
 }
 
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 fn collect_declared_labels(items: &[Item], labels: &mut Vec<String>, seen: &mut HashSet<String>) {
     for item in items {
         let Item::Mod(m) = item else { continue };
@@ -194,6 +192,7 @@ fn collect_declared_labels(items: &[Item], labels: &mut Vec<String>, seen: &mut 
     }
 }
 
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 fn collect_all<'a>(
     items: &'a [Item],
     declared_labels: &[String],
@@ -218,6 +217,7 @@ fn collect_all<'a>(
     Ok(())
 }
 
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 fn collect_violations(
     items: &[Item],
     ctx: &TaintContext,
@@ -384,5 +384,76 @@ mod tests {
     #[test]
     fn missing_entry_file_is_an_error() {
         assert!(scan_crate(Path::new("/nonexistent/lib.rs")).is_err());
+    }
+
+    #[test]
+    fn does_not_revisit_a_file_reached_via_a_self_referential_mod_declaration() {
+        let dir = TempDir::new();
+        let lib = dir.write(
+            "lib.rs",
+            r"
+            #[taint_check(labels = [password])]
+            mod auth;
+            mod lib;
+            ",
+        );
+        dir.write(
+            "auth.rs",
+            r#"
+            fn handle_login(#[sensitive(password)] password: &str) {
+                log_debug(password);
+            }
+            #[taint_sink(password, policy = "no_sensitive")]
+            fn log_debug(msg: &str) {}
+            "#,
+        );
+
+        // `mod lib;` resolves back to `lib.rs` itself (root-style files
+        // resolve submodules in their own directory) — the visited-set
+        // dedup must skip re-processing it rather than looping or
+        // double-counting the violation found in `auth.rs`.
+        let violations = scan_crate(&lib).unwrap();
+        assert_eq!(violations.len(), 1);
+    }
+
+    #[test]
+    fn stops_following_mods_once_max_files_is_reached() {
+        let dir = TempDir::new();
+        let mut lib_src = String::new();
+        for i in 0..(MAX_FILES + 50) {
+            use std::fmt::Write;
+            writeln!(lib_src, "mod m{i};").unwrap();
+        }
+        let lib = dir.write("lib.rs", &lib_src);
+        for i in 0..(MAX_FILES + 50) {
+            dir.write(&format!("m{i}.rs"), "fn f() {}\n");
+        }
+
+        let files = resolve_files(&lib).unwrap();
+        assert_eq!(files.len(), MAX_FILES);
+    }
+
+    #[test]
+    fn collect_all_and_collect_violations_ignore_non_fn_non_mod_items() {
+        let dir = TempDir::new();
+        let lib = dir.write(
+            "lib.rs",
+            r#"
+            struct Unrelated;
+            use std::fmt;
+            #[taint_check(labels = [password])]
+            mod scope {
+                struct AlsoUnrelated;
+                fn handle_login(#[sensitive(password)] password: &str) {
+                    log_debug(password);
+                }
+                #[taint_sink(password, policy = "no_sensitive")]
+                fn log_debug(msg: &str) {}
+            }
+            "#,
+        );
+
+        let violations = scan_crate(&lib).unwrap();
+        assert_eq!(violations.len(), 1);
     }
 }

@@ -1,0 +1,11 @@
+error: capability violation in `open_device`: body uses io(Usb) but only io(None) is declared — add `io(Usb)` to #[capability(...)] (or remove the operation that requires it)
+  --> tests/ui/fail/undeclared_usb.rs:17:4
+   |
+17 | fn open_device() -> rusb::Context {
+   |    ^^^^^^^^^^^
+
+error[E0425]: cannot find function `open_device` in this scope
+  --> tests/ui/fail/undeclared_usb.rs:22:13
+   |
+22 |     let _ = open_device();
+   |             ^^^^^^^^^^^ not found in this scope

@@ -59,6 +59,7 @@ pub const SANITIZER_FN_KEYWORDS: &[&str] = &[
 
 /// If `name` contains one of `keywords` (case-insensitively), return that
 /// keyword.
+#[capability_attr::capability(alloc(none), io(none), ptr(read))]
 fn first_matching_keyword(name: &str, keywords: &[&'static str]) -> Option<&'static str> {
     let lower = name.to_lowercase();
     keywords.iter().find(|kw| lower.contains(*kw)).copied()
@@ -67,12 +68,14 @@ fn first_matching_keyword(name: &str, keywords: &[&'static str]) -> Option<&'sta
 /// Does `param_name` look like a sensitive parameter? Returns the matched
 /// keyword, used verbatim as the taint label.
 #[must_use]
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 pub fn sensitive_label_for_param(param_name: &str) -> Option<&'static str> {
     first_matching_keyword(param_name, SENSITIVE_PARAM_KEYWORDS)
 }
 
 /// Does `fn_name` look like a taint sink?
 #[must_use]
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 pub fn looks_like_sink(fn_name: &str) -> bool {
     first_matching_keyword(fn_name, SINK_FN_KEYWORDS).is_some()
 }
@@ -83,6 +86,7 @@ pub fn looks_like_sink(fn_name: &str) -> bool {
 /// overlap, but sanitizer intent is the more specific, more confident
 /// signal of the two.
 #[must_use]
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 pub fn looks_like_sanitizer(fn_name: &str) -> bool {
     first_matching_keyword(fn_name, SANITIZER_FN_KEYWORDS).is_some()
 }

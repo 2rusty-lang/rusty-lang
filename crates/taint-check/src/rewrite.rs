@@ -35,6 +35,7 @@ impl VisitMut for AttrStripper {
 
 /// Remove every `#[sensitive(...)]` / `#[taint_sink(...)]` /
 /// `#[taint_sanitizer]` attribute from `item_mod`, in place.
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 pub fn strip_helper_attrs(item_mod: &mut ItemMod) {
     AttrStripper.visit_item_mod_mut(item_mod);
 }

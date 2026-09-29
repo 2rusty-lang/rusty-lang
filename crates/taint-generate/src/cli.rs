@@ -37,6 +37,7 @@ struct FileResult {
 /// parent directory's name; anything else uses its own file stem) — used
 /// only for `--report` text, since there's no real `mod` item in a
 /// `mod foo;`-layout file to name it from.
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 fn infer_mod_name(path: &Path) -> String {
     let stem = path
         .file_stem()
@@ -53,6 +54,7 @@ fn infer_mod_name(path: &Path) -> String {
     }
 }
 
+#[capability_attr::capability(alloc(none), io(filesystem), ptr(none))]
 fn read_and_parse(path: &str) -> Result<(String, File), String> {
     let source =
         std::fs::read_to_string(path).map_err(|e| format!("{path}: could not read file: {e}"))?;
@@ -65,6 +67,7 @@ fn read_and_parse(path: &str) -> Result<(String, File), String> {
 /// (if any) found across every file in this same `taint-generate`
 /// invocation — see [`top_level::generate`]'s docs for why sink detection
 /// needs it, not just this file's own scan.
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 fn process(
     path: &str,
     source: String,
@@ -74,7 +77,6 @@ fn process(
     let file_path = Path::new(path);
     let capability_extern_name = manifest::capability_attr_extern_name(file_path);
     let mod_name = infer_mod_name(file_path);
-
     let top = top_level::generate(
         &source,
         file,
@@ -83,10 +85,8 @@ fn process(
         batch_primary_label,
     );
     let mut edits = top.edits;
-
     let (mod_edits, inline_mod_taint_suggestions) = taint_gen::generate(&source, file);
     edits.extend(mod_edits);
-
     FileResult {
         source,
         edits,
@@ -97,6 +97,7 @@ fn process(
     }
 }
 
+#[capability_attr::capability(alloc(none), io(display), ptr(none))]
 fn print_taint_suggestion(path: &str, s: &taint_gen::TaintSuggestion) {
     println!(
         "{path}: mod {} -> #[taint_check(labels = [{}])]",
@@ -114,6 +115,7 @@ fn print_taint_suggestion(path: &str, s: &taint_gen::TaintSuggestion) {
     }
 }
 
+#[capability_attr::capability(alloc(none), io(display), ptr(none))]
 fn print_report(path: &str, result: &FileResult) {
     if result.capability_generation_skipped {
         println!(
@@ -131,8 +133,7 @@ fn print_report(path: &str, result: &FileResult) {
         println!(
             "{path}: NOTE — add #[taint_check(labels = [{}])] by hand to this file's `mod {};` \
              declaration; this pass can't reach it, since that declaration lives in a different file",
-            s.labels.join(", "),
-            s.mod_name
+            s.labels.join(", "), s.mod_name
         );
     }
     for s in &result.inline_mod_taint_suggestions {
@@ -140,6 +141,7 @@ fn print_report(path: &str, result: &FileResult) {
     }
 }
 
+#[capability_attr::capability(alloc(none), io(display), ptr(none))]
 fn print_dry_run_diff(path: &str, result: &FileResult) {
     let mut ordered: Vec<&SourceEdit> = result.edits.iter().collect();
     ordered.sort_by_key(|e| e.start);
@@ -156,11 +158,11 @@ fn print_dry_run_diff(path: &str, result: &FileResult) {
 
 /// Run the CLI over `args` (the process's own `argv`, `argv[0]` included).
 /// Returns the process exit code.
+#[capability_attr::capability(alloc(heap), io(filesystem), ptr(none))]
 pub fn run<I: IntoIterator<Item = String>>(args: I) -> i32 {
     let mut dry_run = false;
     let mut report = false;
     let mut paths = Vec::new();
-
     for arg in args.into_iter().skip(1) {
         match arg.as_str() {
             "--dry-run" => dry_run = true,
@@ -168,12 +170,10 @@ pub fn run<I: IntoIterator<Item = String>>(args: I) -> i32 {
             other => paths.push(other.to_string()),
         }
     }
-
     if paths.is_empty() {
         eprintln!("usage: taint-generate [--dry-run] [--report] <file.rs> [file2.rs ...]");
         return 2;
     }
-
     let mut parsed = Vec::with_capacity(paths.len());
     for path in &paths {
         match read_and_parse(path) {
@@ -184,25 +184,17 @@ pub fn run<I: IntoIterator<Item = String>>(args: I) -> i32 {
             }
         }
     }
-
-    // A label found in any one file here is visible to sink/sanitizer
-    // detection in every other file of this same run — see
-    // `top_level::generate`'s docs.
     let batch_primary_label = parsed
         .iter()
         .find_map(|(_, _, file)| taint_gen::find_labels(file).into_iter().next());
-
     for (path, source, file) in parsed {
         let result = process(path, source, &file, batch_primary_label.as_deref());
-
         if report {
             print_report(path, &result);
         }
-
         if result.edits.is_empty() {
             continue;
         }
-
         if dry_run {
             print_dry_run_diff(path, &result);
         } else {
@@ -213,7 +205,6 @@ pub fn run<I: IntoIterator<Item = String>>(args: I) -> i32 {
             }
         }
     }
-
     0
 }
 
@@ -222,6 +213,19 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[test]
+    fn infer_mod_name_uses_the_parent_directory_for_lib_main_and_mod_rs() {
+        for name in ["lib.rs", "main.rs", "mod.rs"] {
+            let path = Path::new("src/auth").join(name);
+            assert_eq!(infer_mod_name(&path), "auth");
+        }
+    }
+
+    #[test]
+    fn infer_mod_name_uses_its_own_stem_for_any_other_file() {
+        assert_eq!(infer_mod_name(Path::new("src/auth.rs")), "auth");
+    }
 
     /// A target `.rs` file inside its own throwaway crate directory (a
     /// `Cargo.toml` depending on `rusty-capability-attr` alongside it) —
@@ -292,7 +296,7 @@ mod tests {
         assert_eq!(run(vec!["taint-generate".to_string(), file.path_str()]), 0);
         assert!(file
             .read()
-            .contains("#[rusty_capability_attr::capability(alloc(none), io(display), ptr(none))]"));
+            .contains("#[capability_attr::capability(alloc(none), io(display), ptr(none))]"));
     }
 
     #[test]
@@ -360,6 +364,44 @@ mod tests {
             ]),
             0
         );
+    }
+
+    #[test]
+    fn report_prints_capability_and_inline_mod_taint_suggestions() {
+        // A top-level fn (gets a capability suggestion) alongside an
+        // inline `mod` with a sensitive param, a sink, and a sanitizer
+        // (gets a taint suggestion via the *inline*-mod path, not the
+        // top-level-layout path `report_notes_the_manual_taint_check_step_...`
+        // already covers) — exercises `print_report`'s capability-loop and
+        // inline-mod-taint-loop together in one `--report` run.
+        let file = TempFile::new(
+            "fn top_level_fn() {\n    println!(\"hi\");\n}\nmod auth {\n    fn handle_login(password: &str) {\n        log_debug(password);\n    }\n    fn log_debug(msg: &str) {}\n    fn redact_value(s: &str) -> String { s.to_string() }\n}\n",
+        );
+        assert_eq!(
+            run(vec![
+                "taint-generate".to_string(),
+                "--dry-run".to_string(),
+                "--report".to_string(),
+                file.path_str()
+            ]),
+            0
+        );
+    }
+
+    #[test]
+    fn write_failure_after_a_real_edit_is_a_usage_error() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let file = TempFile::new("fn log_message(msg: &str) {\n    println!(\"{msg}\");\n}\n");
+        std::fs::set_permissions(&file.file, std::fs::Permissions::from_mode(0o444)).unwrap();
+
+        let result = run(vec!["taint-generate".to_string(), file.path_str()]);
+
+        // Restore write access so `TempFile::drop`'s cleanup can succeed
+        // regardless of the assertion outcome below.
+        std::fs::set_permissions(&file.file, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        assert_eq!(result, 2);
     }
 
     #[test]

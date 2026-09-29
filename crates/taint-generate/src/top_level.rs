@@ -53,6 +53,7 @@ pub struct TopLevelResult {
 /// supply one — a sink can legitimately live in a different file than the
 /// label reaching it; see [`taint_gen::find_labels`]'s docs.
 #[must_use]
+#[capability_attr::capability(alloc(heap), io(none), ptr(none))]
 pub fn generate(
     source: &str,
     file: &File,
@@ -65,30 +66,23 @@ pub fn generate(
         .as_ref()
         .map(|s| s.labels[0].clone())
         .or_else(|| batch_primary_label.map(ToString::to_string));
-
     let capability_generation_skipped = capability_extern_name.is_none()
         && file.items.iter().any(|item| {
             let Item::Fn(f) = item else { return false };
             !f.attrs.iter().any(capability_gen::is_capability_attr)
         });
-
     let mut edits = Vec::new();
     let mut capability_suggestions = Vec::new();
-
     for item in &file.items {
         let Item::Fn(f) = item else { continue };
-
         let capability_plan = capability_gen::plan_for_fn(f, capability_extern_name);
         let taint_plan = primary_label
             .as_deref()
             .and_then(|label| taint_gen::plan_for_fn(f, label));
-
         if capability_plan.is_none() && taint_plan.is_none() {
             continue;
         }
-
         let mut new_fn = f.clone();
-
         if let Some(plan) = capability_plan {
             if let Ok(attr) = parse_attribute(&plan.attr_text) {
                 new_fn.attrs.push(attr);
@@ -98,7 +92,6 @@ pub fn generate(
                 rendered_attribute: plan.rendered,
             });
         }
-
         if let Some(plan) = taint_plan {
             for (param_name, label) in &plan.sensitive_params {
                 if let Some(attrs) = param_attrs_mut(&mut new_fn, param_name) {
@@ -119,7 +112,6 @@ pub fn generate(
                 }
             }
         }
-
         let (start, end) = span_byte_range(source, f.span());
         edits.push(SourceEdit {
             start,
@@ -127,7 +119,6 @@ pub fn generate(
             replacement: print_item(&Item::Fn(new_fn)),
         });
     }
-
     TopLevelResult {
         edits,
         capability_suggestions,
@@ -141,6 +132,7 @@ pub fn generate(
 /// inline (no `Pat::Type`/`Pat::Ident` helper is exported from that
 /// private-to-the-crate module, and duplicating just the match here is
 /// simpler than exporting one for a single caller).
+#[capability_attr::capability(alloc(none), io(none), ptr(none))]
 fn param_attrs_mut<'f>(f: &'f mut ItemFn, param_name: &str) -> Option<&'f mut Vec<Attribute>> {
     f.sig.inputs.iter_mut().find_map(|arg| {
         let FnArg::Typed(pt) = arg else { return None };
@@ -229,6 +221,33 @@ fn handle_login(password: &str) {
         );
         let suggestion = result.taint_suggestion.unwrap();
         assert_eq!(suggestion.labels, vec!["token".to_string()]);
+    }
+
+    #[test]
+    fn generates_a_taint_sanitizer_attribute() {
+        let source = "fn handle_login(password: &str) {}\nfn redact_value(s: &str) -> String { s.to_string() }\n";
+        let file: File = syn::parse_str(source).unwrap();
+        let result = generate(source, &file, "auth", None, None);
+        let sanitizer_edit = result
+            .edits
+            .iter()
+            .find(|e| e.replacement.contains("redact_value"))
+            .unwrap();
+        assert!(sanitizer_edit.replacement.contains("#[taint_sanitizer]"));
+    }
+
+    #[test]
+    fn param_attrs_mut_skips_a_non_ident_param_pattern() {
+        // `plan_for_fn`'s own `pat_ident_name` already filters
+        // `sensitive_params` down to real identifiers before this ever
+        // runs, so this is a defensive mismatch-guard, not a path real
+        // heuristic detection reaches on its own — exercised here
+        // directly instead of contorting a fixture to fool the heuristic.
+        let file: File = syn::parse_str("fn f((a, b): (&str, &str)) {}").unwrap();
+        let Item::Fn(mut f) = file.items[0].clone() else {
+            panic!("expected a fn");
+        };
+        assert!(param_attrs_mut(&mut f, "a").is_none());
     }
 
     #[test]
