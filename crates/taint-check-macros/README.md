@@ -31,6 +31,17 @@ never has to resolve them as attributes in their own right.
 For the standalone CLI (no proc-macro dependency needed), see
 [`rusty-taint-check`](../taint-check).
 
+## Relationship to OS-level MAC (AppArmor/SELinux)
+
+`#[taint_check]` is a compile-time, AST-only check, and it only covers the
+`mod` it annotates. It is layered with, not a substitute for, OS-level
+mandatory access control (AppArmor/SELinux): it cannot see a compromised
+binary, a dependency that never used the attribute, or any process on the
+host not built from this workspace. A passing build is not evidence that a
+process is sandboxed. Keep (or add) an AppArmor/SELinux profile for the
+resulting binary exactly as you would without this crate. See
+`docs/adr/ADR-0002-position-vs-os-level-mac.md`.
+
 Part of the [rusty](https://github.com/2rusty-lang/rusty-lang) workspace —
 see the [workspace README](https://github.com/2rusty-lang/rusty-lang),
 `rfcs/0003-taint-check.md`, and

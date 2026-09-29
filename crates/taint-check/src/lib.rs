@@ -82,6 +82,18 @@
 //! use auth::log_debug as ld;
 //! ld(password); // NOT caught — different spelling, same function
 //! ```
+//!
+//! # Relationship to OS-level MAC (AppArmor/SELinux)
+//!
+//! This is a source-level, AST-only check, layered with — not a substitute
+//! for — OS-level mandatory access control (AppArmor/SELinux). It only sees
+//! the files (or `--crate` module tree) it is pointed at; it says nothing
+//! about a compromised binary, a dependency it never scanned, or any process
+//! on the host not built from this source. A clean run is not evidence that a
+//! process is sandboxed or that classified data cannot leak at runtime. Keep
+//! (or add) an AppArmor/SELinux profile for the resulting binary exactly as
+//! you would without this crate. See
+//! `docs/adr/ADR-0002-position-vs-os-level-mac.md`.
 
 #![warn(missing_docs)]
 // `cargo_common_metadata` inspects every workspace member's `Cargo.toml`

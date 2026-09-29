@@ -57,6 +57,18 @@ fn __taint_refactor_redact_password(v: &str) -> String {
   reported in `--report`'s output as skipped, not silently dropped. See
   `crates/taint-refactor/src/patch.rs`'s module docs for why.
 
+## Relationship to OS-level MAC (AppArmor/SELinux)
+
+Applying this tool's patches can make `taint-check` pass; it does not make
+the process safe at runtime. The check it satisfies is source-level and
+compile-time only, and the sanitizer it generates is a placeholder. Both
+are layered with, not a substitute for, OS-level mandatory access control
+(AppArmor/SELinux), which covers what they cannot — a compromised binary,
+a dependency that never used the attributes, any process on the host not
+built from this workspace. Keep (or add) an AppArmor/SELinux profile for
+the resulting binary exactly as you would without this crate. See
+`docs/adr/ADR-0002-position-vs-os-level-mac.md`.
+
 Part of the [rusty](https://github.com/2rusty-lang/rusty-lang) workspace —
 see the [workspace README](https://github.com/2rusty-lang/rusty-lang),
 `rfcs/0006-taint-refactor.md`, and

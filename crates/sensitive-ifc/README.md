@@ -22,6 +22,17 @@ that classification in the type system: it deliberately does not implement
 `println!`, `format!`, or a JSON serializer becomes a compile error instead
 of a runtime leak. Zero proc-macro, zero extra tooling, zero runtime cost.
 
+## Relationship to OS-level MAC (AppArmor/SELinux)
+
+`Sensitive<T, L>` catches accidental `Display`/serialization of classified
+data, at compile time, in code that actually uses the type. It is layered
+with, not a substitute for, OS-level mandatory access control
+(AppArmor/SELinux): it cannot see a compromised binary, a dependency that
+never wrapped its secrets in `Sensitive`, or any process on the host not
+built from this workspace. Keep (or add) an AppArmor/SELinux profile for
+the resulting binary exactly as you would without this crate. See
+`docs/adr/ADR-0002-position-vs-os-level-mac.md`.
+
 Part of the [rusty](https://github.com/2rusty-lang/rusty-lang) workspace —
 see the [workspace README](https://github.com/2rusty-lang/rusty-lang) and
 `docs/aisecurity/ifc-rfc.md` for full design background.

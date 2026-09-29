@@ -69,6 +69,17 @@ Both tools default to writing changes directly; both support `--dry-run`
 **`taint-refactor` generates actual code with security implications and
 must be reviewed before trusting its output.**
 
+## Relationship to OS-level MAC (AppArmor/SELinux)
+
+Everything in this workspace is compile-time or source-level checking, and
+it only covers code built (or scanned) with these tools applied. It is
+layered with, not a substitute for, OS-level mandatory access control
+(AppArmor/SELinux), which covers what these checks cannot — a compromised
+binary, a dependency that never used the attributes, any process on the
+host not built from this workspace. Keep (or add) an AppArmor/SELinux
+profile for the resulting binary exactly as you would without these
+crates. See `docs/adr/ADR-0002-position-vs-os-level-mac.md`.
+
 ## Building locally
 
 Requires the pinned toolchain in `rust-toolchain.toml` (currently 1.88.0);

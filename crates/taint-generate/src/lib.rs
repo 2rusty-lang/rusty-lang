@@ -35,6 +35,19 @@
 //! leaves everything else in the file untouched — see that crate's own
 //! docs for why a naive full-file `syn`+`prettyplease` round-trip would be
 //! the wrong tool here.
+//!
+//! # Relationship to OS-level MAC (AppArmor/SELinux)
+//!
+//! This tool writes annotations into source; it enforces nothing itself. The
+//! checks that later consume those annotations are compile-time only, and
+//! the taint attributes it generates are heuristic guesses. A source tree
+//! full of generated attributes is not a sandbox: it is layered with, not a
+//! substitute for, OS-level mandatory access control (AppArmor/SELinux),
+//! which covers what compile-time checks cannot — a compromised binary, a
+//! dependency that never used the attributes, any process on the host not
+//! built from this workspace. Keep (or add) an AppArmor/SELinux profile for
+//! the resulting binary exactly as you would without this crate. See
+//! `docs/adr/ADR-0002-position-vs-os-level-mac.md`.
 
 #![warn(missing_docs)]
 #![allow(

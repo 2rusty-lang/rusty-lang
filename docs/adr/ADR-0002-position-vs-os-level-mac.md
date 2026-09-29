@@ -74,3 +74,29 @@ under-scrutinize the actual runtime attack surface. Stating the boundary
 explicitly is cheaper than the alternative: someone shipping a
 `capability-attr`-annotated binary with no AppArmor/SELinux profile because
 the marketing implied one covered the other.
+
+# Amendment (2026-09-20): scope extended to the taint crates
+
+The Decision above named only `capability-attr` and `sensitive-ifc`. The
+same reasoning applies, unchanged, to every crate that checks or generates
+policy annotations for those two, and the rule now covers them explicitly:
+
+- `taint-check` and `taint-check-macros` — AST-level taint propagation
+  (CLI and `#[taint_check]`). Source-level only; sees just the files or
+  `mod` it is pointed at.
+- `taint-generate` — writes `#[capability(...)]` and taint attributes into
+  source. It enforces nothing itself, and its taint attributes are
+  heuristic; a tree full of generated attributes is not a sandbox.
+- `taint-refactor` — generates patches that make `taint-check` pass. A
+  passing check is not runtime safety, and the sanitizer it emits is a
+  placeholder.
+
+Internal-only crates (`path-match`, `capability-core`, `source-edit`) make
+no user-facing security claims and are exempt.
+
+Each covered crate's README and crate-level docs (`lib.rs`), and the
+workspace `README.md`, carry a "Relationship to OS-level MAC
+(AppArmor/SELinux)" section stating the layered-not-substitutive
+relationship. New crates that check or generate capability/IFC/taint
+policy must add the same section. The original Decision text is unchanged;
+only its scope is extended.
